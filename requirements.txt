@@ -1,0 +1,7 @@
+torch
+torchvision
+transformers
+safetensors
+huggingface_hub
+sentencepiece
+protobuf

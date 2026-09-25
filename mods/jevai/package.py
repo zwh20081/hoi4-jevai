@@ -37,10 +37,14 @@ def main(argv=None):
     os.makedirs(work, exist_ok=True)
     with open(entry, "w", encoding="utf-8") as f:
         f.write("from mods.jevai.runtime.runner import main\nmain()\n")
+    # the runner needs openvino, tokenizers and numpy; torch & co. only come in through openvino's optional frontends
+    excludes = [x for m in ("torch", "torchvision", "transformers", "datasets", "sklearn", "nncf", "scipy", "pandas",
+                            "matplotlib", "tensorflow", "keras", "jax", "onnx", "paddle", "IPython")
+                for x in ("--exclude-module", m)]
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--console", "--name", "jevai",
                     "--distpath", os.path.join(out, "runner_dist"), "--workpath", os.path.join(work, "pyi"),
                     "--specpath", work, "--paths", ROOT, "--collect-all", "openvino", "--collect-binaries", "tokenizers",
-                    entry], check=True)
+                    *excludes, entry], check=True)
     shutil.move(os.path.join(out, "runner_dist", "jevai"), os.path.join(out, "runner"))
     os.rmdir(os.path.join(out, "runner_dist"))
     shutil.copytree(a.model, os.path.join(out, "runner", "model"))

@@ -282,6 +282,21 @@ def write_atomic(path: str, text: str):
     os.replace(tmp, path)
 
 
+class Tee:
+    """Runner output goes to the console and to jevai.log next to jevai.exe, readable after the window closes."""
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, s):
+        for st in self.streams:
+            st.write(s)
+
+    def flush(self):
+        for st in self.streams:
+            st.flush()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="JevAI runner: the model picks AI postures in your HOI4 game")
     ap.add_argument("--game", default=None, help="path to hoi4.exe (default: found through Steam)")
@@ -296,6 +311,8 @@ def main(argv=None):
     ap.add_argument("--player", default="", help="extra tag(s) never to steer, comma separated (humans are excluded anyway)")
     a = ap.parse_args(argv)
     sys.stdout.reconfigure(errors="replace")  # mod names can be in any script; a redirected cp1252 stdout must not crash
+    sys.stdout = Tee(sys.stdout, open(os.path.join(here(), "jevai.log"), "a", encoding="utf-8"))
+    print(f"\n=== JevAI runner started {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
     out_dir = os.path.join(a.userdir, "mod", "jevai", "history", "units")
     if not os.path.isdir(out_dir):
         sys.exit(f"JevAI mod not found in {os.path.join(a.userdir, 'mod', 'jevai')}; install it first")
@@ -324,6 +341,7 @@ def main(argv=None):
     log = GameLog(a.userdir)
     print(f"reading {log.path}", flush=True)
     model = names_en = None
+    last = None  # month index of the last decision: the first month logged after the model is ready decides
     while True:
         if game is not None and game.poll() is not None:
             print("HOI4 closed; JevAI runner exits", flush=True)
@@ -337,14 +355,21 @@ def main(argv=None):
                 continue
             model, names_en = ready["model"], ready["names"]
             log.complete(quiet=0)  # months logged while the model compiled are history; decide from the next one on
+            print("waiting for the next month to be logged (the mod logs every country on the 1st)", flush=True)
         for date, lines in log.complete():
             y, mo = map(int, date.split(".")[:2])
-            if (y * 12 + mo) % a.every:
-                continue
+            now = f"[{time.strftime('%H:%M:%S')}] {date}"
             if log.mode in (None, "off"):
-                print(f"[{time.strftime('%H:%M:%S')}] {date}: " + ("waiting for the JevAI choice in the start-of-game event"
-                      if log.mode is None else "JevAI is off for this game (vanilla AI)"), flush=True)
+                print(f"{now}: " + ("waiting for the JevAI choice in the start-of-game event" if log.mode is None
+                                    else "JevAI is off for this game (vanilla AI)"), flush=True)
                 continue
+            month = y * 12 + mo
+            if last is not None and month < last:  # a different save was loaded
+                last = None
+            if last is not None and month - last < a.every:
+                print(f"{now}: month logged; next decision in {a.every - (month - last)} month(s)", flush=True)
+                continue
+            last = month
             recs, names, humans, majors = log_records(lines, names_en, date)
             humans |= set(filter(None, a.player.split(",")))
             elig = [t for t, r in recs.items() if t not in humans and r["mil"] + r["civ"] >= a.min_factories

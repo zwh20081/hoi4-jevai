@@ -1,6 +1,6 @@
 ﻿l_english:
  jevai.1.t: "JevAI: Who Should the Model Command?"
- jevai.1.d: "JevAI replaces part of the AI's strategy with a trained model. Every few months it picks a strategic posture (defensive buildup, industrial expansion, armored offensive, air power, naval power or total war economy) for the AI countries it commands. Your own country is never affected.\n\nThe model runs in jevai.exe next to the game; while it is not running, countries keep their last posture."
+ jevai.1.d: "JevAI replaces part of the AI's strategy with a trained model. Every month (every week if you choose major powers only) it picks a strategic posture (defensive buildup, industrial expansion, armored offensive, air power, naval power or total war economy) for the AI countries it commands. Your own country is never affected.\n\nThe model runs in jevai.exe next to the game; while it is not running, countries keep their last posture."
  jevai.1.a: "Major powers only"
  jevai.1.b: "All AI countries"
  jevai.1.c: "None (vanilla AI)"

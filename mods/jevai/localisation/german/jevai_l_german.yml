@@ -1,6 +1,6 @@
 ﻿l_german:
  jevai.1.t: "JevAI: Wen soll das Modell führen?"
- jevai.1.d: "JevAI ersetzt einen Teil der KI-Strategie durch ein trainiertes Modell. Alle paar Monate wählt es für die KI-Länder, die es führt, eine strategische Ausrichtung (defensiver Ausbau, industrielle Expansion, Panzeroffensive, Luftmacht, Seemacht oder totale Kriegswirtschaft). Ihr eigenes Land bleibt unberührt.\n\nDas Modell läuft in jevai.exe neben dem Spiel; solange es nicht läuft, behalten die Länder ihre letzte Ausrichtung."
+ jevai.1.d: "JevAI ersetzt einen Teil der KI-Strategie durch ein trainiertes Modell. Jeden Monat (jede Woche, wenn nur Großmächte gewählt sind) wählt es für die KI-Länder, die es führt, eine strategische Ausrichtung (defensiver Ausbau, industrielle Expansion, Panzeroffensive, Luftmacht, Seemacht oder totale Kriegswirtschaft). Ihr eigenes Land bleibt unberührt.\n\nDas Modell läuft in jevai.exe neben dem Spiel; solange es nicht läuft, behalten die Länder ihre letzte Ausrichtung."
  jevai.1.a: "Nur Großmächte"
  jevai.1.b: "Alle KI-Länder"
  jevai.1.c: "Keine (Standard-KI)"

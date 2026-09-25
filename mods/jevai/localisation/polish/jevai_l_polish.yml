@@ -1,6 +1,6 @@
 ﻿l_polish:
  jevai.1.t: "JevAI: kim ma dowodzić model?"
- jevai.1.d: "JevAI zastępuje część strategii SI wytrenowanym modelem. Co kilka miesięcy wybiera postawę strategiczną (rozbudowa obrony, ekspansja przemysłowa, ofensywa pancerna, lotnictwo, marynarka lub gospodarka wojny totalnej) dla krajów SI, którymi dowodzi. Twój kraj nigdy nie jest objęty.\n\nModel działa w jevai.exe obok gry; gdy nie działa, kraje zachowują ostatnią postawę."
+ jevai.1.d: "JevAI zastępuje część strategii SI wytrenowanym modelem. Co miesiąc (co tydzień, jeśli wybierzesz tylko mocarstwa) wybiera postawę strategiczną (rozbudowa obrony, ekspansja przemysłowa, ofensywa pancerna, lotnictwo, marynarka lub gospodarka wojny totalnej) dla krajów SI, którymi dowodzi. Twój kraj nigdy nie jest objęty.\n\nModel działa w jevai.exe obok gry; gdy nie działa, kraje zachowują ostatnią postawę."
  jevai.1.a: "Tylko mocarstwa"
  jevai.1.b: "Wszystkie kraje SI"
  jevai.1.c: "Żadnym (standardowa SI)"

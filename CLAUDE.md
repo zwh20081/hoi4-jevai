@@ -45,18 +45,21 @@ python -m mods.jevai.package --model temp/ov/<name>           # release: mod + j
 
 Players run `jevai.exe` (the frozen runner): it starts HOI4 (or attaches with `--no-launch`) and compiles the model in a
 background thread while the game loads (cold NPU compile ~2 min, overlapping the game load; later starts load from
-cache). No launch option, dump or console input: on the 1st of every month the mod logs each country's state to
-`game.log` (`on_actions/jevai.txt`: `JEV|S` numbers, `T` stability/war support/ratios, `G` ideology group key, `H`
-human-played, `N`/`E`/`A` one line per neighbour/enemy/ally), and `runner.log_records` rebuilds the training-format
-state text from them. Country names come from the game's and active mods' English localisation (`TAG_<group>`, then
-`TAG`) and ideologies from the group key, so the text stays English in any game language. Units at the front, fleets
+cache). No launch option, dump or console input: `scripted_effects/jevai_state.txt` (`jev_log_state`) logs a country's
+state to `game.log` (`JEV|S` numbers, `T` stability/war support/ratios/posture, `G` ideology group key, `H`
+human-played, `MAJOR`, `N`/`E`/`A` one line per neighbour/enemy/ally), monthly for every country and, in the "major
+powers only" mode, weekly for major powers. `runner.GameLog` groups lines into bursts by game date and keeps each
+country's latest lines, and `runner.log_records` rebuilds the training-format state text. Country names come from the
+game's and active mods' English localisation (`TAG_<group>`, then `TAG`) and ideologies from the group key, so the text
+stays English in any game language (modded ideology groups keep their localized name). Units at the front, fleets
 and equipment requests are not available to scripts: the text shows 0 / omits them (a known difference from the
 dump-built training text; everything else matched on 91/91 countries of a real month, `temp/checks/check_logpath.py`).
-Each `--every` game months it scores the six postures for the AI countries the player chose in the start-of-game event
-(`events/jevai.txt`: majors / all / off) and writes `mod/jevai/history/units/JEVAI_orders.txt`; the mod's `on_weekly`
-reloads it with `load_oob` (once per week, whatever the tags) and `jev_follow_orders` applies the posture to AI
-countries only. Unverified in-game so far: that `load_oob` re-reads the file from disk on every call (the probe mod in
-`temp/oobprobe/` tests it; it needs an unlocked desktop so the game can run).
+Each completed burst is decided for the countries in it (every AI country monthly, or the majors weekly, per the
+start-of-game event in `events/jevai.txt`), keeping the current posture unless another scores `--stick` (0.01) higher,
+and written to `mod/jevai/history/units/JEVAI_orders.txt`; the mod's `on_daily` reloads it with `load_oob` (once per
+day, whatever the tags) and `jev_follow_orders` applies the posture to AI countries only. The runner logs to
+`runner/jevai.log`. Unverified in-game so far: that `load_oob` re-reads the file from disk on every call (`JEV|ACT`
+lines in game.log show postures being applied).
 
 Load order: overhaul mods `replace_path` `common/on_actions`, `events`, `common/scripted_effects` and `history/units`,
 which drops those folders from every mod loaded before them, and mods load alphabetically unless a dependency says

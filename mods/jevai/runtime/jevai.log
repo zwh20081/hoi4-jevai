@@ -1,0 +1,30 @@
+
+=== JevAI runner started 2026-09-25 22:14:14
+JevAI loads after 26 overhaul mods (from the next game start): 52字体, Cold War Iron Curtain-Chinese Version, Eight Years' War of Resistance Chinese Version, Equestria at War, Extremis Ultimis Demo: The Death of Democracy, Fembavaria, Genshin Impact:The Twist of Teyvat, Hearts of Cookie 2 CH ver., KaiserreduX, Kaiserredux汉化, Kaiserreich, Millennium Anime 2, Millennium Dawn: A Modern Day Mod, Old World Blues, Pax Britannica: An Imperial Timeline, Red Flood, Red World Fan Fork CN, TNO: Requiem, The Fire Rises, The Great War Redux, The Great War Redux CN, The New Order: Last Days of Europe, The Road to 56, The road to 56 CN, Thousand Week Reich, [Touhou project mod] Remnants of the Apocalypse
+reading D:/devs/hoi4jevai/temp/release_test3/user\logs\game.log
+model on NPU (jev_npu.xml) ready in 0s
+waiting for the next month to be logged (the mod logs every country on the 1st)
+[22:15:05] 2020.2.1 (all): 28 countries in 44s on NPU; USA industrial expansion, PRC defensive buildup, SOV defensive buildup, RAJ industrial expansion, ENG industrial expansion, GER naval power
+
+=== JevAI runner started 2026-09-25 22:25:49
+JevAI loads after 26 overhaul mods (from the next game start): 52字体, Cold War Iron Curtain-Chinese Version, Eight Years' War of Resistance Chinese Version, Equestria at War, Extremis Ultimis Demo: The Death of Democracy, Fembavaria, Genshin Impact:The Twist of Teyvat, Hearts of Cookie 2 CH ver., KaiserreduX, Kaiserredux汉化, Kaiserreich, Millennium Anime 2, Millennium Dawn: A Modern Day Mod, Old World Blues, Pax Britannica: An Imperial Timeline, Red Flood, Red World Fan Fork CN, TNO: Requiem, The Fire Rises, The Great War Redux, The Great War Redux CN, The New Order: Last Days of Europe, The Road to 56, The road to 56 CN, Thousand Week Reich, [Touhou project mod] Remnants of the Apocalypse
+reading D:/devs/hoi4jevai/temp/release_test4/user\logs\game.log
+model on NPU (jev_npu.xml) ready in 0s
+waiting for the next update (every country on the 1st of the month; major powers weekly in that mode)
+[22:25:52] 2020.2.1 (majors): 8 countries in 13s on NPU; USA industrial expansion, PRC defensive buildup, SOV defensive buildup, RAJ industrial expansion, ENG industrial expansion, GER naval power
+
+=== JevAI runner started 2026-09-25 22:26:21
+JevAI loads after 26 overhaul mods (from the next game start): 52字体, Cold War Iron Curtain-Chinese Version, Eight Years' War of Resistance Chinese Version, Equestria at War, Extremis Ultimis Demo: The Death of Democracy, Fembavaria, Genshin Impact:The Twist of Teyvat, Hearts of Cookie 2 CH ver., KaiserreduX, Kaiserredux汉化, Kaiserreich, Millennium Anime 2, Millennium Dawn: A Modern Day Mod, Old World Blues, Pax Britannica: An Imperial Timeline, Red Flood, Red World Fan Fork CN, TNO: Requiem, The Fire Rises, The Great War Redux, The Great War Redux CN, The New Order: Last Days of Europe, The Road to 56, The road to 56 CN, Thousand Week Reich, [Touhou project mod] Remnants of the Apocalypse
+reading D:/devs/hoi4jevai/temp/release_test4/user\logs\game.log
+model on NPU (jev_npu.xml) ready in 0s
+waiting for the next update (every country on the 1st of the month; major powers weekly in that mode)
+[22:26:23] 2020.2.1 (majors): 8 countries in 13s on NPU; USA industrial expansion, PRC defensive buildup, SOV defensive buildup, RAJ industrial expansion, ENG industrial expansion, GER naval power
+[22:26:36] 2020.2.8 (majors): 8 countries in 13s on NPU; USA industrial expansion, PRC defensive buildup, SOV armored offensive, RAJ industrial expansion, ENG armored offensive, GER naval power
+
+=== JevAI runner started 2026-09-25 22:27:14
+JevAI loads after 26 overhaul mods (from the next game start): 52字体, Cold War Iron Curtain-Chinese Version, Eight Years' War of Resistance Chinese Version, Equestria at War, Extremis Ultimis Demo: The Death of Democracy, Fembavaria, Genshin Impact:The Twist of Teyvat, Hearts of Cookie 2 CH ver., KaiserreduX, Kaiserredux汉化, Kaiserreich, Millennium Anime 2, Millennium Dawn: A Modern Day Mod, Old World Blues, Pax Britannica: An Imperial Timeline, Red Flood, Red World Fan Fork CN, TNO: Requiem, The Fire Rises, The Great War Redux, The Great War Redux CN, The New Order: Last Days of Europe, The Road to 56, The road to 56 CN, Thousand Week Reich, [Touhou project mod] Remnants of the Apocalypse
+reading D:/devs/hoi4jevai/temp/release_test4/user\logs\game.log
+model on NPU (jev_npu.xml) ready in 0s
+waiting for the next update (every country on the 1st of the month; major powers weekly in that mode)
+[22:27:16] 2020.2.1 (majors): 8 countries in 13s on NPU; USA industrial expansion, PRC defensive buildup, SOV defensive buildup, RAJ industrial expansion, ENG defensive buildup, GER naval power
+[22:27:29] 2020.2.8 (majors): 8 countries in 13s on NPU; USA industrial expansion, PRC defensive buildup, SOV defensive buildup, RAJ industrial expansion, ENG defensive buildup, GER naval power

@@ -4,14 +4,14 @@ launch option, dump or console input needed at play time; ships as jevai.exe.
 
     jevai.exe [--game "...\\Hearts of Iron IV\\hoi4.exe"] [--userdir ...] [--device auto|NPU|CPU|GPU] [--no-launch]
 
-The mod logs each country's state on the 1st of every month (on_actions/jevai.txt: JEV|S/T/G/H/N/E/A lines); the runner
-rebuilds the model's state text from them. It compiles the model for the NPU while the game loads (the first compile
-takes ~2 min, later starts load it from cache). Every `--every` game months it scores all six postures for the AI
-countries the player chose in the start-of-game event and writes them to the mod's order file,
-<userdir>/mod/jevai/history/units/JEVAI_orders.txt; the mod reloads it weekly with load_oob and applies each posture
-through its scripted effects. At startup it also makes JevAI load after every installed overhaul mod (see
-patch_load_order). The runner exits when a game it launched closes; --no-launch attaches to a game started from the
-Paradox launcher.
+The mod logs each country's state to game.log (scripted_effects/jevai_state.txt: JEV|S/T/G/H/N/E/A lines): every
+country on the 1st of each month and, in the "major powers only" mode, the major powers every week. The runner
+rebuilds the model's state text from them and decides for the countries in each update: every AI country monthly, or
+the major powers weekly. It compiles the model for the NPU while the game loads (the first compile takes ~2 min, later
+starts load it from cache) and writes the choices to <userdir>/mod/jevai/history/units/JEVAI_orders.txt; the mod
+reloads that file daily with load_oob and applies each posture through its scripted effects. At startup it also makes
+JevAI load after every installed overhaul mod (see patch_load_order). The runner exits when a game it launched closes;
+--no-launch attaches to a game started from the Paradox launcher.
 """
 from __future__ import annotations
 
@@ -137,12 +137,14 @@ def english_names(roots: list[str]) -> dict[str, str]:
 
 
 class GameLog:
-    """The mod's JEV lines, read from <userdir>/logs/game.log as the game writes them, grouped by game date. The game
-    recreates the file when it starts, so a file shorter than what was read means a new session."""
+    """The mod's JEV lines, read from <userdir>/logs/game.log as the game writes them. Lines come in bursts (every
+    country on the 1st of each month; major powers weekly in the "major powers only" mode), grouped here by game date.
+    `latest` keeps each country's most recent lines, so a weekly burst of major powers still sees last month's
+    neighbours. The game recreates the file when it starts, so a file shorter than what was read means a new session."""
 
     def __init__(self, userdir: str):
         self.path = os.path.join(userdir, "logs", "game.log")
-        self.pos, self.mode, self.months, self.last = 0, None, {}, 0.0
+        self.pos, self.mode, self.bursts, self.latest, self.last = 0, None, {}, {}, 0.0
 
     def poll(self):
         try:
@@ -150,7 +152,7 @@ class GameLog:
         except OSError:
             return
         if size < self.pos:
-            self.pos, self.mode, self.months = 0, None, {}
+            self.pos, self.mode, self.bursts, self.latest = 0, None, {}, {}
         if size == self.pos:
             return
         with open(self.path, "rb") as f:
@@ -166,15 +168,23 @@ class GameLog:
             if p[1] == "MODE" and len(p) > 2:
                 self.mode = p[2]
             elif p[1] in KINDS and len(p) > 2:
-                self.months.setdefault(tuple(map(int, m.groups()[:3])), []).append(p)
+                self.bursts.setdefault(tuple(map(int, m.groups()[:3])), []).append(p)
                 self.last = time.time()
 
-    def complete(self, quiet: float = 5.0) -> list[tuple[str, list[list[str]]]]:
-        """Months whose burst of lines has ended: a later month has begun, or nothing new came for `quiet` seconds."""
-        done = sorted(self.months)
+    def complete(self, quiet: float = 5.0) -> list[tuple[str, set[str]]]:
+        """Bursts whose lines have all arrived (a later burst began, or nothing new came for `quiet` seconds), oldest
+        first, as (date, tags that reported in it); each one updates `latest`."""
+        done = sorted(self.bursts)
         if done and time.time() - self.last < quiet:
             done = done[:-1]
-        return [(".".join(map(str, d)), self.months.pop(d)) for d in done]
+        out = []
+        for d in done:
+            by: dict[str, list] = {}
+            for p in self.bursts.pop(d):
+                by.setdefault(p[2], []).append(p)
+            self.latest.update(by)
+            out.append((".".join(map(str, d)), {t for t, ls in by.items() if any(p[1] == "S" for p in ls)}))
+        return out
 
 
 def _num(kv: dict, k: str) -> float:
@@ -267,7 +277,7 @@ class Model:
 def orders_file(postures: dict[str, int], date: str, device: str) -> str:
     """An OOB file whose instant_effect sets each country's wanted posture; the mod applies it to AI countries.
     It holds no units, so loading it changes nothing but those variables."""
-    lines = [f"# JevAI orders for {date} ({device}); rewritten by the runner, reloaded weekly by the mod\n",
+    lines = [f"# JevAI orders for {date} ({device}); rewritten by the runner, reloaded daily by the mod\n",
              "instant_effect = {\n"]
     for tag, k in sorted(postures.items()):
         lines.append(f"\tif = {{ limit = {{ country_exists = {tag} }} {tag} = {{ set_variable = {{ jev_want = {k} }} }} }}\n")
@@ -305,8 +315,8 @@ def main(argv=None):
     ap.add_argument("--userdir", default=default_userdir())
     ap.add_argument("--model", default=os.path.join(here(), "model"))
     ap.add_argument("--device", default="auto", choices=["auto", "NPU", "CPU", "GPU"])
-    ap.add_argument("--every", type=int, default=3, help="decide every N game months")
     ap.add_argument("--horizon", type=int, default=6, help="months the posture questions look ahead")
+    ap.add_argument("--stick", type=float, default=0.01, help="keep the current posture unless another scores this much higher")
     ap.add_argument("--min-factories", type=int, default=20, help="skip countries with fewer military + civilian factories")
     ap.add_argument("--player", default="", help="extra tag(s) never to steer, comma separated (humans are excluded anyway)")
     a = ap.parse_args(argv)
@@ -341,7 +351,6 @@ def main(argv=None):
     log = GameLog(a.userdir)
     print(f"reading {log.path}", flush=True)
     model = names_en = None
-    last = None  # month index of the last decision: the first month logged after the model is ready decides
     while True:
         if game is not None and game.poll() is not None:
             print("HOI4 closed; JevAI runner exits", flush=True)
@@ -354,33 +363,36 @@ def main(argv=None):
                 time.sleep(1)
                 continue
             model, names_en = ready["model"], ready["names"]
-            log.complete(quiet=0)  # months logged while the model compiled are history; decide from the next one on
-            print("waiting for the next month to be logged (the mod logs every country on the 1st)", flush=True)
-        for date, lines in log.complete():
-            y, mo = map(int, date.split(".")[:2])
-            now = f"[{time.strftime('%H:%M:%S')}] {date}"
-            if log.mode in (None, "off"):
-                print(f"{now}: " + ("waiting for the JevAI choice in the start-of-game event" if log.mode is None
-                                    else "JevAI is off for this game (vanilla AI)"), flush=True)
-                continue
-            month = y * 12 + mo
-            if last is not None and month < last:  # a different save was loaded
-                last = None
-            if last is not None and month - last < a.every:
-                print(f"{now}: month logged; next decision in {a.every - (month - last)} month(s)", flush=True)
-                continue
-            last = month
-            recs, names, humans, majors = log_records(lines, names_en, date)
-            humans |= set(filter(None, a.player.split(",")))
-            elig = [t for t, r in recs.items() if t not in humans and r["mil"] + r["civ"] >= a.min_factories
-                    and (log.mode == "all" or t in majors)]
-            t0 = time.time()
-            chosen = {t: int(np.argmax(model.scores(state_text(recs[t], names, recs), a.horizon))) + 1 for t in elig}
-            write_atomic(os.path.join(out_dir, ORDERS + ".txt"), orders_file(chosen, date, model.device))
-            top = sorted(chosen.items(), key=lambda kv: -(recs[kv[0]]["mil"] + recs[kv[0]]["civ"]))[:6]
-            print(f"[{time.strftime('%H:%M:%S')}] {date} ({log.mode}): {len(chosen)} countries in {time.time() - t0:.0f}s on "
-                  f"{model.device}; " + ", ".join(f"{t} {POSTURES[k - 1]}" for t, k in top), flush=True)
-        time.sleep(1)
+            log.complete(quiet=0)  # bursts logged while the model compiled are history; decide from the next one on
+            print("waiting for the next update (every country on the 1st of the month; major powers weekly in that mode)",
+                  flush=True)
+        done = log.complete()
+        if not done:
+            time.sleep(1)
+            continue
+        date, reported = done[-1]  # if the game ran ahead of the model, the older bursts are stale: decide the newest
+        now = f"[{time.strftime('%H:%M:%S')}] {date}"
+        if log.mode in (None, "off"):
+            print(f"{now}: " + ("waiting for the JevAI choice in the start-of-game event" if log.mode is None
+                                else "JevAI is off for this game (vanilla AI)"), flush=True)
+            continue
+        recs, names, humans, majors = log_records([p for ls in log.latest.values() for p in ls], names_en, date)
+        humans |= set(filter(None, a.player.split(",")))
+        elig = [t for t in reported if t in recs and t not in humans and recs[t]["mil"] + recs[t]["civ"] >= a.min_factories
+                and (log.mode == "all" or t in majors)]
+        if not elig:
+            continue
+        t0 = time.time()
+        chosen = {}
+        for t in elig:
+            u = model.scores(state_text(recs[t], names, recs), a.horizon)
+            best, cur = int(np.argmax(u)), int(recs[t]["jev"].get("pos") or 0) - 1  # cur: posture in force, -1 none
+            # near-ties flip with tiny changes (even the date): switch only for a clear gain
+            chosen[t] = (cur if 0 <= cur < len(u) and u[best] - u[cur] < a.stick else best) + 1
+        write_atomic(os.path.join(out_dir, ORDERS + ".txt"), orders_file(chosen, date, model.device))
+        top = sorted(chosen.items(), key=lambda kv: -(recs[kv[0]]["mil"] + recs[kv[0]]["civ"]))[:6]
+        print(f"{now} ({log.mode}): {len(chosen)} countries in {time.time() - t0:.0f}s on {model.device}; "
+              + ", ".join(f"{t} {POSTURES[k - 1]}" for t, k in top), flush=True)
 
 
 if __name__ == "__main__":

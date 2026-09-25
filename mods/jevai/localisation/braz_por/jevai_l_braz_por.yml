@@ -1,6 +1,6 @@
 ﻿l_braz_por:
  jevai.1.t: "JevAI: quem o modelo deve comandar?"
- jevai.1.d: "O JevAI substitui parte da estratégia da IA por um modelo treinado. A cada poucos meses, ele escolhe uma postura estratégica (reforço defensivo, expansão industrial, ofensiva blindada, poder aéreo, poder naval ou economia de guerra total) para os países da IA que comanda. Seu próprio país nunca é afetado.\n\nO modelo roda no jevai.exe ao lado do jogo; enquanto não estiver rodando, os países mantêm a última postura."
+ jevai.1.d: "O JevAI substitui parte da estratégia da IA por um modelo treinado. Todo mês (toda semana, se você escolher apenas as grandes potências), ele escolhe uma postura estratégica (reforço defensivo, expansão industrial, ofensiva blindada, poder aéreo, poder naval ou economia de guerra total) para os países da IA que comanda. Seu próprio país nunca é afetado.\n\nO modelo roda no jevai.exe ao lado do jogo; enquanto não estiver rodando, os países mantêm a última postura."
  jevai.1.a: "Apenas grandes potências"
  jevai.1.b: "Todos os países da IA"
  jevai.1.c: "Nenhum (IA padrão)"

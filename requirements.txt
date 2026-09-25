@@ -5,3 +5,5 @@ safetensors
 huggingface_hub
 sentencepiece
 protobuf
+tokenizers
+numpy

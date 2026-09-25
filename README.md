@@ -1,117 +1,94 @@
----
-license: apache-2.0
-language:
-- en
-base_model: microsoft/deberta-v3-large
-pipeline_tag: text-classification
-library_name: transformers
-tags:
-- typed-decisions
-- calibrated
-- decision-model
-- open-jev
-- deberta-v3
-datasets:
-- mteb/banking77
-- SetFit/sst5
-- google/boolq
----
+# JevAI
 
-# open-jev-deberta-v3-large
-
-**An open, Jev-shaped typed-decision model.** One program *state* and any number of typed *questions*
-(`choice` over up to 255 options / `score` over 2–10 ordered levels / `noul` yes-no) go in; a calibrated
-probability distribution per question comes back from **one forward pass**. Nothing is generated, so the
-structured-output error rate is 0 by construction.
-
-This is an independent reproduction of the *shape* of TypeSafe AI's Jev ("System One Model"); it is not
-affiliated with TypeSafe, uses none of their data or code, and its numbers are not comparable to theirs
-(they report agreement with frontier models on private workflows; this model is measured on public gold
-labels). Code, corpus builder, ablations and the full measured record:
-[kotoba-lang/typed-decisions](https://github.com/kotoba-lang/typed-decisions) and the ADRs it cites.
-
-## Use
-
-```python
-# pip install torch transformers safetensors huggingface_hub sentencepiece protobuf
-import sys; sys.path.insert(0, "<path to this repo snapshot>")   # or: pip install git+https://github.com/kotoba-lang/typed-decisions
-from typed_decisions.open_jev import OpenJev
-
-m = OpenJev.from_pretrained("com-kotobalabs/open-jev-deberta-v3-large")
-m.decide(
-    "I was charged twice for the same order and nobody answers my emails. I want my money back now.",
-    [{"type": "choice", "instructions": "Which product area is the message about?",
-      "options": ["fees & charges", "pin & security", "refund & dispute", "top-up", "exchange & fiat", "atm & cash", "transfer", "card", "account & identity", "other"]},
-     {"type": "score",  "instructions": "How positive is the sentiment of this message?",
-      "options": ["very negative", "negative", "neutral", "positive", "very positive"]},
-     {"type": "noul",   "instructions": "The customer is asking for a refund."}])
-# [{'choice': 'fees & charges', 'probabilities': {...}, 'confidence': 0.733},
-#  {'score': 0.846, 'probabilities': {...}, 'confidence': 0.527},
-#  {'noul': 0.892}]
-```
-
-`score` is the expected level index (may fall between levels); `noul` is p(yes). Every answer carries the
-full distribution. Context: 512 tokens total (state is cut to 256 tokens). CPU fp32 on an M1 Max: 1.8 s for
-4 questions; H100 bf16: 28 ms end-to-end for 10 questions on one state (25 ms forward), 518 questions/s at
-batch 8.
+JevAI lets a typed-decision model steer Hearts of Iron IV AI countries. Every few game months, the model (a
+fine-tuned [open-jev-deberta-v3-large](https://huggingface.co/com-kotobalabs/open-jev-deberta-v3-large)) reads a
+country's situation as text, scores six strategic postures, and the best one is applied to that country's AI through
+the game console. The games also produce the training data: decisions are partly random with known odds, so what
+happened afterwards is a causal label for the posture taken.
 
 ## How it works
 
+- **The mod** (`mods/jevai`) adds six postures, each a bundle of AI-only levers (`add_ai_strategy` entries and `ai_*`
+  modifiers for unit mix, production, factory ratios and construction). None gives a gameplay bonus; they change what
+  the AI decides. The mod also logs monthly telemetry: stability, war support, strength ratios, the posture in force
+  and cumulative production.
+- **The game** runs with `-dump_history`, which writes one JSON per game month: factories, divisions, fronts, wars,
+  the AI's own strategy plans and the mod's telemetry.
+- **The runtime** (`mods/jevai/runtime`) turns a month into one text per country and asks the model three questions
+  per posture, 6 months ahead: power trend, no territory lost, territory gained. It picks the posture with the best
+  `P(no loss) + P(gain) + 0.5 * expected growth (0..1)`. Commands reach the game through its console, typed with
+  SendInput (the game ignores posted window messages) and confirmed by an acknowledgement effect in the log.
+- **Collection** (`mods/collector`, in a Windows VM) runs several games at once. In Jev games a coin flip per country
+  decides whether Jev or the vanilla AI controls it, and 30 to 50% of Jev's decisions are random, each logged with its
+  odds.
+- **Datasets** (`datasets/`) label every country-month with what happened 3, 6 and 12 months later (forecast
+  questions) and every confirmed decision with its outcome (posture questions). Games are split whole into
+  train, validation and test.
+- **Training** (`trainer/`) fine-tunes the model with cross-entropy + Brier loss and keeps the checkpoint with the
+  best validation Brier skill.
+
+## Layout
+
 ```
-[CLS] [STATE] state [Q] instructions [OPT] option_1 [OPT] option_2 … [Q] … [SEP]
+models/          download pointers (*.txt); the weights are downloaded next to them and not committed
+mods/jevai/      the mod: HOI4 script files + runtime/ (the Python side, shipped with the mod)
+mods/collector/  VM-only data collection: game queue (__main__.py), Jev in the loop (jevd.py), window helpers
+datasets/        build.py (games -> train/val/test), effects.py (posture effect analysis)
+trainer/         model.py, train.py, evaluate.py
+temp/            everything generated: games, dataset, training runs, the template game userdir (not committed)
 ```
 
-A DeBERTa-v3-large encoder reads state and all questions at once. For each option the head scores
-`[mean(question tokens); mean(option tokens); product]`; a softmax **within each question's option group**
-is that question's distribution. The three marker tokens are added to the tokenizer; `head.safetensors`
-holds the 3-layer scoring head; `open_jev_config.json` holds the pooling mode, the post-hoc temperature
-(fitted on a validation split) and the training provenance. Loss was cross-entropy + Brier; training used
-gold-preserving question augmentation (option shuffling, paraphrase templates, distractor dropping,
-level relabelling, noul negation with flipped gold) at p = 0.7.
+## Setup
 
-## Training data
+Python 3.13 with a torch build for your device, then `requirements.txt`. On an Intel GPU:
 
-Public gold labels only — no synthetic answers, no teacher model:
+```
+conda create -n py313 python=3.13 -y && conda activate py313
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/xpu
+uv pip install -r requirements.txt
+hf download com-kotobalabs/open-jev-deberta-v3-large --local-dir models/open-jev-deberta-v3-large
+```
 
-| source | state | questions |
-|---|---|---|
-| `mteb/banking77` | customer message | choice: intent (77) · choice: product area (10, keyword rule over intent names) · noul: "asks about a card" |
-| `SetFit/sst5` | review sentence | score: sentiment level (5) · choice: polarity (3) · noul: "expresses a positive opinion" |
-| `google/boolq` | passage | noul: the dataset's question |
+Collection also needs HOI4 1.19 on Windows (`HOI4_EXE`), the template userdir `temp/hoi4user` with the start saves
+`save games/jev_1936_06.hoi4` and `jev_1936_06_nonhist.hoi4`, and optionally `JEVAI_SCRATCH` for the games' live
+userdirs (default `%LOCALAPPDATA%\jevai\inst`).
 
-18,000 train states / 42,000 questions, 1 epoch, seed 2, one H100 (229 s, ≈ $0.25).
+## Commands
 
-## Measured (test: 1,500 states / 3,508 questions; OOD: 4,012 never-seen questions on the same states)
+From the repo root:
 
-| | accuracy | Brier | ECE |
-|---|---|---|---|
-| in-domain (question types seen in training) | **0.854** | 0.213 | 0.022 |
-| banking77 intent (77 options) | 0.916 | | |
-| boolq | 0.879 | | |
-| sst5 level (5 ordered) | 0.599 acc / 0.51 MAE | | |
-| **OOD** (new instructions and new option sets) | **0.690** | 0.399 | 0.035 |
-| OOD: negated boolq noul | 0.83 | | |
-| OOD: banking77 topic (new 5-way partition) | 0.61 | | |
-| OOD: sst5 stars / disappointed (new level sets) | 0.45 (majority 0.26) | | |
+```
+python -m mods.collector --slots 3 --games 9                    # collect (VM); --status shows progress
+python -m mods.collector.jevd --model temp/train/<name>/best    # Jev in the loop, next to the collector
+python -m datasets.build                                        # temp/games -> temp/dataset
+python -m trainer.train --out temp/train/<name> --bf16          # fine-tune; keeps temp/train/<name>/best
+python -m trainer.evaluate temp/dataset/test.jsonl --model temp/train/<name>/best --device xpu --bf16
+python -m datasets.effects --pv 2                               # which postures helped or hurt
+python -m mods.jevai.runtime.postures                           # regenerate the mod's posture files
+```
 
-Three seeds of this configuration: in-domain 0.847 ± 0.005, OOD 0.678 ± 0.012. Larger context-free
-sweeps, the head ablation (a fresh marker-token head does not learn; the span head does), the comparison
-against ModernBERT-base/large and against a LoRA-tuned LLaDA-MoE-7B-A1B (0.835 in-domain at 16× the
-latency), and the code-decision variant (which definition does this one reference, 0.63 on held-out
-namespaces, chance 0.18) are in the repository README.
+## What was measured
 
-## Limitations
+Feasibility, on a 12-core 16 GB VM (2026-09-23):
+- Console `run <file>` plus `e TAG <scripted_effect>` works from outside the game, and `add_ai_strategy` takes effect.
+  Posted key and mouse messages are ignored; SendInput with the window in the foreground works.
+- Fresh 1936 starts crashed 8 times out of 8 between 1936-06-01 and 06-24, with the same access violation whatever
+  the mod or launch flags. Loading the 1936-06-01 autosave gets past it, so every game starts from there.
+- D3D11 crashed when a second instance loaded under VMware; `-ogl` does not. One instance needs about 5.6 GB.
+- Observer mode at speed 5 takes about 22 s per game month, or 30 minutes for 1936-06 to 1943.
+- The stock model is at or below the majority baseline on every HOI4 question: it knows nothing about the game.
 
-- **It reads the question only partly.** In-domain 0.85 vs OOD 0.69 is the honest gap; unseen ordered
-  scales are the weakest (score on new level sets is barely above majority).
-- English only; 512-token context; three public domains (banking support, movie reviews, Wikipedia yes/no).
-  Anything else is out of distribution and should be measured before use.
-- Confidence is the max probability after temperature scaling on the validation split (in-domain ECE
-  0.022); on OOD questions it is over-confident by ~0.03 mean and should be re-calibrated on your data.
-- It cannot generate text or arguments; it chooses among the options you give it.
+Collection up to 2026-09-25: 33 games (g01-g24 with posture set v1, g25-g33 with v2), 1,817 game-months and 6,890
+Jev decisions (5,917 v1, 973 v2). The dataset has 446k states and 2.4M questions (train 249k, validation 114k,
+test 83k states), including 17,910 posture question sets. Rare events: capitulation 2.4%, territory gained 5.6%,
+territory lost 5.4%, a new war 19.1%.
 
-## Provenance
-
-Built in the `kotoba-lang` workspace with the recipe and measurements recorded in
-ADR-2609181544 / ADR-2609181715 (superproject `com-junkawasaki/root`). Base model
-`microsoft/deberta-v3-large` (MIT). Datasets: banking77 (CC-BY-4.0), SST-5, BoolQ (CC-BY-SA-3.0).
+Posture effects in the v2 games (`datasets.effects --pv 2`, 95% intervals from resampling whole games):
+- Production follows the posture: air power 1.49x planes [1.23, 1.60], armored offensive 1.30x armor [1.14, 1.39],
+  defensive buildup 1.19x support equipment [1.08, 1.27], total war economy 1.12x military factories [1.10, 1.18].
+  Naval power is unclear: 1.08x ships [0.86, 1.17].
+- Compared with total war economy over 6 months, industrial expansion gained +2.4 points of power growth
+  [+0.9, +3.3] and +0.6 states [+0.35, +0.86], from 72 decisions in 4 games. Power counts factories and divisions,
+  not planes or ships, so the air and naval postures look worse by construction.
+- The untrained model did no better than the vanilla AI: -1.3 points of growth [-4.6, +1.7] in v2 games, and -0.17
+  states per 6 months [-0.26, -0.05] in v1 games.

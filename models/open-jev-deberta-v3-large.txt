@@ -1,0 +1,2 @@
+https://huggingface.co/com-kotobalabs/open-jev-deberta-v3-large
+hf download com-kotobalabs/open-jev-deberta-v3-large --local-dir models/open-jev-deberta-v3-large

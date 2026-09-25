@@ -1,16 +1,4 @@
 temp/
-models/
+models/*/
 .venv/
 __pycache__/
-
-# pre-restructure locations of data and the model snapshot
-/runs/
-/hoi4user/
-/.cache/
-/*.safetensors
-/spm.model
-/tokenizer*.json
-/special_tokens_map.json
-/added_tokens.json
-/config.json
-/open_jev_config.json

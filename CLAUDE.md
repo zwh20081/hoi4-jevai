@@ -43,9 +43,10 @@ python -m mods.jevai.package --model temp/ov/<name>           # release: mod + j
 
 ## Player runner (mods/jevai/runtime/runner.py)
 
-Players run `jevai.exe` (the frozen runner): it starts HOI4 (or attaches with `--no-launch`) and compiles the model in a
-background thread while the game loads (cold NPU compile ~2 min, overlapping the game load; later starts load from
-cache). No launch option, dump or console input: `scripted_effects/jevai_state.txt` (`jev_log_state`) logs a country's
+Players only use the Paradox launcher. `jevai.exe --install` (the release's `install.cmd`, run once) adds a Startup-folder
+shortcut that runs `jevai.exe --hidden` at logon and starts it; `--uninstall` removes both. The runner (one per user,
+named mutex) waits for `hoi4.exe`, loads the model when it appears (NPU compile ~2 min the first time, then from
+cache in ~0 s), steers that game until the process exits, frees the model and waits again (`runner.session`). No launch option, dump or console input: `scripted_effects/jevai_state.txt` (`jev_log_state`) logs a country's
 state to `game.log` (`JEV|S` numbers, `T` stability/war support/ratios/posture, `G` ideology group key, `H`
 human-played, `MAJOR`, `N`/`E`/`A` one line per neighbour/enemy/ally), monthly for every country and, in the "major
 powers only" mode, weekly for major powers. `runner.GameLog` groups lines into bursts by game date and keeps each

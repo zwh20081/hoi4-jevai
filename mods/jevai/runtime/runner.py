@@ -1,21 +1,24 @@
-"""The JevAI runner: starts Hearts of Iron IV (or attaches to it), reads the mod's monthly state lines from game.log,
-asks the model which posture each AI country should follow, and hands the choices to the mod. No Python install,
-launch option, dump or console input needed at play time; ships as jevai.exe.
+"""The JevAI runner: waits in the background for Hearts of Iron IV, reads the mod's state lines from game.log, asks the
+model which posture each AI country should follow, and hands the choices to the mod. No Python install, launch option,
+dump or console input needed; players only use the Paradox launcher. Ships as jevai.exe.
 
-    jevai.exe [--game "...\\Hearts of Iron IV\\hoi4.exe"] [--userdir ...] [--device auto|NPU|CPU|GPU] [--no-launch]
+    jevai.exe --install      start JevAI with Windows (a hidden Startup-folder shortcut) and right away
+    jevai.exe --uninstall    remove that and stop the background runner
+    jevai.exe                run in this window: wait for HOI4, steer it while it runs, repeat
 
 The mod logs each country's state to game.log (scripted_effects/jevai_state.txt: JEV|S/T/G/H/N/E/A lines): every
-country on the 1st of each month and, in the "major powers only" mode, the major powers every week. The runner
-rebuilds the model's state text from them and decides for the countries in each update: every AI country monthly, or
-the major powers weekly. It compiles the model for the NPU while the game loads (the first compile takes ~2 min, later
-starts load it from cache) and writes the choices to <userdir>/mod/jevai/history/units/JEVAI_orders.txt; the mod
-reloads that file daily with load_oob and applies each posture through its scripted effects. At startup it also makes
-JevAI load after every installed overhaul mod (see patch_load_order). The runner exits when a game it launched closes;
---no-launch attaches to a game started from the Paradox launcher.
+country on the 1st of each month and, in the "major powers only" mode, the major powers every week. When HOI4 starts,
+the runner loads the model (NPU if present, else CPU; the first NPU compile takes ~2 min, later loads come from cache),
+rebuilds the model's state text from each update and decides for the countries in it: every AI country monthly, or
+the major powers weekly. It writes the choices to <userdir>/mod/jevai/history/units/JEVAI_orders.txt; the mod reloads
+that file daily with load_oob and applies each posture through its scripted effects. When the game closes it frees
+the model and waits for the next one. It also keeps JevAI loading after every installed overhaul mod
+(patch_load_order).
 """
 from __future__ import annotations
 
 import argparse
+import ctypes
 import glob
 import json
 import os
@@ -36,6 +39,7 @@ IDEOLOGY = {"fascism": "fascist", "communism": "communist", "democratic": "democ
 LINE = re.compile(r"^\[[^\]]*\]\[(\d+)\.(\d+)\.(\d+)\.\d+\]\[[^\]]*\]: (JEV\|.*?)\s*$")
 KINDS = {"S", "T", "G", "H", "N", "E", "A", "MAJOR"}
 LOC_NAME = re.compile(r'^\s*([A-Z][A-Z0-9]{2}(?:_(?:fascism|communism|democratic|neutrality))?):\d*\s*"(.*)"\s*$')
+NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW for helper processes
 
 
 def default_userdir() -> str:
@@ -58,12 +62,39 @@ def find_game() -> str | None:
     return None
 
 
-def launch_game(exe: str, userdir: str, extra: list[str]) -> subprocess.Popen:
-    """Start HOI4 without its launcher, so the mod set is the one the launcher last saved in dlc_load.json."""
-    args = [exe, "-nolauncher", *extra]
-    if os.path.normcase(os.path.abspath(userdir)) != os.path.normcase(default_userdir()):
-        args.append(f"-userdir={userdir}")
-    return subprocess.Popen(args, cwd=os.path.dirname(exe))
+def pids(image: str) -> list[int]:
+    """PIDs of running processes with this image name."""
+    r = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {image}", "/FO", "CSV", "/NH"], capture_output=True, text=True,
+                       creationflags=NO_WINDOW)
+    return [int(m) for m in re.findall(r'^"[^"]+","(\d+)"', r.stdout, re.M)]
+
+
+STARTUP_LINK = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "Startup",
+                            "JevAI.lnk")
+
+
+def install(exe: str):
+    """A Startup-folder shortcut that runs `jevai.exe --hidden` at every logon, then start it now."""
+    q = lambda s: s.replace("'", "''")  # noqa: E731 - PowerShell single-quoted string
+    subprocess.run(["powershell", "-NoProfile", "-Command",
+                    f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{q(STARTUP_LINK)}');$s.TargetPath='{q(exe)}';"
+                    f"$s.Arguments='--hidden';$s.WorkingDirectory='{q(os.path.dirname(exe))}';$s.WindowStyle=7;$s.Save()"],
+                   check=True, capture_output=True, creationflags=NO_WINDOW)
+    if not pids_of_others("jevai.exe"):
+        os.startfile(STARTUP_LINK)
+    print(f"JevAI starts with Windows ({STARTUP_LINK}) and is running now. Just play from the Paradox launcher.")
+
+
+def uninstall():
+    if os.path.exists(STARTUP_LINK):
+        os.remove(STARTUP_LINK)
+    for pid in pids_of_others("jevai.exe"):
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, creationflags=NO_WINDOW)
+    print("JevAI no longer starts with Windows, and the background runner is stopped.")
+
+
+def pids_of_others(image: str) -> list[int]:
+    return [p for p in pids(image) if p != os.getpid()]
 
 
 def here() -> str:
@@ -307,40 +338,14 @@ class Tee:
             st.flush()
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(description="JevAI runner: the model picks AI postures in your HOI4 game")
-    ap.add_argument("--game", default=None, help="path to hoi4.exe (default: found through Steam)")
-    ap.add_argument("--no-launch", action="store_true", help="attach to a game started from the Paradox launcher")
-    ap.add_argument("--game-args", default="", help="extra HOI4 launch options, space separated")
-    ap.add_argument("--userdir", default=default_userdir())
-    ap.add_argument("--model", default=os.path.join(here(), "model"))
-    ap.add_argument("--device", default="auto", choices=["auto", "NPU", "CPU", "GPU"])
-    ap.add_argument("--horizon", type=int, default=6, help="months the posture questions look ahead")
-    ap.add_argument("--stick", type=float, default=0.01, help="keep the current posture unless another scores this much higher")
-    ap.add_argument("--min-factories", type=int, default=20, help="skip countries with fewer military + civilian factories")
-    ap.add_argument("--player", default="", help="extra tag(s) never to steer, comma separated (humans are excluded anyway)")
-    a = ap.parse_args(argv)
-    sys.stdout.reconfigure(errors="replace")  # mod names can be in any script; a redirected cp1252 stdout must not crash
-    sys.stdout = Tee(sys.stdout, open(os.path.join(here(), "jevai.log"), "a", encoding="utf-8"))
-    print(f"\n=== JevAI runner started {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
-    out_dir = os.path.join(a.userdir, "mod", "jevai", "history", "units")
-    if not os.path.isdir(out_dir):
-        sys.exit(f"JevAI mod not found in {os.path.join(a.userdir, 'mod', 'jevai')}; install it first")
-    deps = patch_load_order(a.userdir)
-    if deps:
-        print(f"JevAI loads after {len(deps)} overhaul mods (from the next game start): {', '.join(deps)}", flush=True)
-
-    exe = a.game or find_game()
-    game = None
-    if not a.no_launch:
-        if not exe:
-            sys.exit("hoi4.exe not found through Steam; pass --game <path to hoi4.exe> (or --no-launch)")
-        game = launch_game(exe, a.userdir, a.game_args.split())
-        print(f"started HOI4 (pid {game.pid}); preparing the model while it loads", flush=True)
+def session(a, out_dir: str, pid: int):
+    """Steer one running game until its process `pid` exits: load the English names and the model (from the NPU cache
+    after the first time) while the game loads, then decide on each update the mod logs."""
     ready: dict = {}
 
-    def prepare():  # the model compiles while the game loads
+    def prepare():
         try:
+            exe = find_game()
             ready["names"] = english_names(([os.path.dirname(exe)] if exe else []) + active_mods(a.userdir))
             ready["model"] = Model(a.model, a.device)
         except Exception as e:  # noqa: BLE001 - reported below; the game keeps running without the model
@@ -349,21 +354,23 @@ def main(argv=None):
     loader = threading.Thread(target=prepare, daemon=True)
     loader.start()
     log = GameLog(a.userdir)
-    print(f"reading {log.path}", flush=True)
     model = names_en = None
+    checked = time.time()
     while True:
-        if game is not None and game.poll() is not None:
-            print("HOI4 closed; JevAI runner exits", flush=True)
-            return
+        if time.time() - checked > 5:
+            checked = time.time()
+            if pid not in pids("hoi4.exe"):
+                return
         log.poll()
         if model is None:
             if "error" in ready:
-                sys.exit(f"model failed to load: {ready['error']}")
+                print(f"model failed to load: {ready['error']}", flush=True)
+                return
             if loader.is_alive():
                 time.sleep(1)
                 continue
             model, names_en = ready["model"], ready["names"]
-            log.complete(quiet=0)  # bursts logged while the model compiled are history; decide from the next one on
+            log.complete(quiet=0)  # what was logged before the model was ready is history; decide from the next update
             print("waiting for the next update (every country on the 1st of the month; major powers weekly in that mode)",
                   flush=True)
         done = log.complete()
@@ -393,6 +400,52 @@ def main(argv=None):
         top = sorted(chosen.items(), key=lambda kv: -(recs[kv[0]]["mil"] + recs[kv[0]]["civ"]))[:6]
         print(f"{now} ({log.mode}): {len(chosen)} countries in {time.time() - t0:.0f}s on {model.device}; "
               + ", ".join(f"{t} {POSTURES[k - 1]}" for t, k in top), flush=True)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="JevAI runner: the model picks AI postures in your HOI4 games")
+    ap.add_argument("--install", action="store_true", help="start JevAI with Windows (hidden) and right away")
+    ap.add_argument("--uninstall", action="store_true", help="stop starting with Windows and stop the background runner")
+    ap.add_argument("--hidden", action="store_true", help="no window (how the Startup shortcut runs it)")
+    ap.add_argument("--userdir", default=default_userdir())
+    ap.add_argument("--model", default=os.path.join(here(), "model"))
+    ap.add_argument("--device", default="auto", choices=["auto", "NPU", "CPU", "GPU"])
+    ap.add_argument("--horizon", type=int, default=6, help="months the posture questions look ahead")
+    ap.add_argument("--stick", type=float, default=0.01, help="keep the current posture unless another scores this much higher")
+    ap.add_argument("--min-factories", type=int, default=20, help="skip countries with fewer military + civilian factories")
+    ap.add_argument("--player", default="", help="extra tag(s) never to steer, comma separated (humans are excluded anyway)")
+    a = ap.parse_args(argv)
+    if a.install or a.uninstall:
+        if a.uninstall:
+            return uninstall()
+        if not getattr(sys, "frozen", False):
+            sys.exit("--install works from jevai.exe")
+        return install(sys.executable)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    if a.hidden:
+        ctypes.windll.user32.ShowWindow(k32.GetConsoleWindow(), 0)
+    mutex = k32.CreateMutexW(None, False, r"Local\JevAIRunner")  # one runner per user
+    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        sys.exit("JevAI is already running")
+    sys.stdout.reconfigure(errors="replace")  # mod names can be in any script; a redirected cp1252 stdout must not crash
+    sys.stdout = Tee(sys.stdout, open(os.path.join(here(), "jevai.log"), "a", encoding="utf-8"))
+    print(f"\n=== JevAI runner started {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+    out_dir = os.path.join(a.userdir, "mod", "jevai", "history", "units")
+    if not os.path.isdir(out_dir):
+        sys.exit(f"JevAI mod not found in {os.path.join(a.userdir, 'mod', 'jevai')}; install it first")
+    n_deps = None
+    while True:
+        deps = patch_load_order(a.userdir)  # before each game, so a newly installed overhaul is covered
+        if len(deps) != n_deps:
+            n_deps = len(deps)
+            print(f"JevAI loads after {n_deps} overhaul mods (read by the launcher at its next start)", flush=True)
+        print("waiting for HOI4 (start it from the Paradox launcher)", flush=True)
+        while not (running := pids("hoi4.exe")):
+            time.sleep(5)
+        print(f"[{time.strftime('%H:%M:%S')}] HOI4 started (pid {running[0]}); loading the model", flush=True)
+        session(a, out_dir, running[0])
+        print(f"[{time.strftime('%H:%M:%S')}] HOI4 closed", flush=True)
+    del mutex
 
 
 if __name__ == "__main__":

@@ -56,12 +56,13 @@ class Packer:
         except ValueError:
             return False
 
-    def __call__(self, items, length: int | None = None) -> dict[str, np.ndarray]:
-        """Pack [(state, questions), ...]; `length` pads every sequence to that size (fixed-shape devices)."""
+    def __call__(self, items, length: int | None = None, questions: int | None = None, options: int | None = None) -> dict[str, np.ndarray]:
+        """Pack [(state, questions), ...]. `length`, `questions` and `options` fix the padded size of the sequence,
+        the question count and the option count (fixed shapes); otherwise each is the batch maximum."""
         enc = [self.encode(s, qs) for s, qs in items]
         L = length or max(len(ids) for ids, _ in enc)
-        Qm = max(len(qs) for _, qs in items)
-        Om = max(len(q.options) for _, qs in items for q in qs)
+        Qm = questions or max(len(qs) for _, qs in items)
+        Om = options or max(len(q.options) for _, qs in items for q in qs)
         B = len(items)
         input_ids = np.full((B, L), self.pad, np.int64)
         attention_mask = np.zeros((B, L), np.int64)

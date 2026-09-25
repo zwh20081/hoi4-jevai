@@ -1,0 +1,3 @@
+# JevAI orders: the runner (jevai.exe) rewrites this file; empty until it runs
+instant_effect = {
+}

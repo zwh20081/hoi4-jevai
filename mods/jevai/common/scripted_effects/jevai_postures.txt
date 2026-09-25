@@ -194,6 +194,17 @@ jev_set_posture_0 = {
 	jev_clear_posture = yes
 	log = "JEV|ACT|[ROOT.GetTag]|posture=0"
 }
+jev_follow_orders = {
+	if = { limit = { is_ai = yes NOT = { check_variable = { jev_want = jev_posture } } }
+		if = { limit = { check_variable = { jev_want = 0 } } jev_set_posture_0 = yes }
+		if = { limit = { check_variable = { jev_want = 1 } } jev_set_posture_1 = yes }
+		if = { limit = { check_variable = { jev_want = 2 } } jev_set_posture_2 = yes }
+		if = { limit = { check_variable = { jev_want = 3 } } jev_set_posture_3 = yes }
+		if = { limit = { check_variable = { jev_want = 4 } } jev_set_posture_4 = yes }
+		if = { limit = { check_variable = { jev_want = 5 } } jev_set_posture_5 = yes }
+		if = { limit = { check_variable = { jev_want = 6 } } jev_set_posture_6 = yes }
+	}
+}
 jev_ack_0 = {
 	log = "JEV|ACK|0"
 }

@@ -37,7 +37,25 @@ python -m datasets.effects --h 6 --pv 2         # posture effects from the games
 python -m mods.jevai.runtime.postures           # regenerate the mod's posture files
 python -m mods.collector --slots 3 --games 9    # VM; --status; restart with --adopt slot:run:save:seed:jev per live game
 python -m mods.collector.jevd --model temp/train/<name>/best   # VM, next to the collector
+python -m trainer.export --model temp/train/<name>/best --out temp/ov/<name>   # OpenVINO IR (conda env `ov`)
+python -m mods.jevai.package --model temp/ov/<name>           # release: mod + jevai.exe runner + model (env `ov`)
 ```
+
+## Player runner (mods/jevai/runtime/runner.py)
+
+Players start HOI4 with `-dump_history` and run `jevai.exe` (the frozen runner). Each `--every` game months it scores
+all six postures for every non-player country and writes `mod/jevai/history/units/JEVAI_orders.txt`. The mod's
+`on_daily` reloads that file with `load_oob`; its `instant_effect` sets `jev_want`, and `jev_follow_orders` applies
+the posture to AI countries only. No console input. Unverified in-game so far: that `load_oob` re-reads the file
+from disk on every call (the probe mod in `temp/oobprobe/` tests it; it needs an unlocked desktop so the game can run).
+
+- `trainer/export.py` writes two IR graphs of the same model, FP16, fixed shapes (1 x 512 tokens, 3 posture
+  questions): `jev_npu.xml` uses `trainer/npu_attention.py` (relative-position gathers as one-hot matmuls, mask as an
+  additive bias, the attention scale as a Python constant; the traced TorchScript scale made the NPU wrong) and runs
+  ~7x faster on the Intel NPU; `jev_cpu.xml` keeps the stock attention, which is faster on CPU. The runner uses the
+  NPU if present, else CPU, and caches the NPU compile (~75 s) in `%LOCALAPPDATA%\jevai\ov_cache`.
+- The `ov` conda env (CPU torch, openvino, nncf, pyinstaller) is separate from `py313` so exports never disturb
+  training. Training itself runs fastest on a CUDA box: `trainer/train.sh <name>` starts or resumes it in tmux.
 
 ## Layout rules
 

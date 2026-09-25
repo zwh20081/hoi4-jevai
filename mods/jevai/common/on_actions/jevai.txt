@@ -4,6 +4,18 @@ on_actions = {
 			log = "JEV|START|[GetDateText]"
 		}
 	}
+	# The runner (runtime/runner.py) rewrites history/units/JEVAI_orders.txt with each AI country's wanted posture
+	# (jev_want). Reloading it every day picks up new orders without any console input; jev_follow_orders applies a
+	# posture only to AI countries and only when it changed.
+	on_daily = {
+		effect = {
+			load_oob = "JEVAI_orders"
+			every_country = {
+				limit = { has_variable = jev_want }
+				jev_follow_orders = yes
+			}
+		}
+	}
 	# Passive telemetry only: one line per country per month with the fields -dump_history lacks.
 	# Parsed by mods/jevai/runtime/game.py parse_logs (the line also lands in the dump's `logs` list).
 	# P = cumulative equipment produced by category (lets us measure what a posture changed),

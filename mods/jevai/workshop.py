@@ -1,11 +1,13 @@
 """Publish the JevAI release folder (mods.jevai.package --out) as a Hearts of Iron IV Steam Workshop item, through the
-running Steam client and the game's own steam_api64.dll, as the Paradox launcher uploads mods. The first run creates
-the item and writes its id into descriptor.mod as remote_file_id (in this folder and in the release); later runs
-update that item. The page text is workshop.txt (Steam BBCode; {id} becomes the item id).
+running Steam client and Steam's flat C API, as the Paradox launcher uploads mods. The first run creates the item and
+writes its id into descriptor.mod as remote_file_id (in this folder and in the release); later runs update that item.
+The page text is workshop.txt (Steam BBCode; {id} becomes the item id).
 
-    python -m mods.jevai.workshop temp/release/jevai --note "what changed" [--visibility private]
+    python -m mods.jevai.workshop temp/release/jevai --note "what changed" [--visibility private] [--steam-api DLL]
 
-Needs Steam running, logged in with an account that owns HOI4. A new item starts private.
+Needs Steam running, logged in with an account that owns HOI4, and a stock steam_api64.dll from Steamworks SDK 1.48 or
+later: the game's by default. If the game's was replaced (DLC unlockers do) or is older, --steam-api takes any other
+Steamworks app's; the app id comes from steam_appid.txt, not from the DLL. A new item starts private.
 """
 from __future__ import annotations
 
@@ -14,6 +16,7 @@ import ctypes as C
 import os
 import re
 import sys
+import tempfile
 import time
 
 from .runtime.runner import _read, find_game
@@ -43,6 +46,7 @@ def main(argv=None):
     ap.add_argument("content", help="the release folder (mods.jevai.package --out)")
     ap.add_argument("--note", default="", help="change note on the item's page")
     ap.add_argument("--visibility", choices=VISIBILITY, help="default: private for a new item, unchanged for an update")
+    ap.add_argument("--steam-api", help="a stock steam_api64.dll, Steamworks SDK 1.48+ (default: the game's)")
     a = ap.parse_args(argv)
     content = os.path.abspath(a.content)
     preview = os.path.join(content, "thumbnail.png")
@@ -53,28 +57,48 @@ def main(argv=None):
     if len(page.replace("{id}", "0" * 12).encode()) > 8000:
         sys.exit("workshop.txt is over Steam's 8000-byte description limit")
     game = find_game()
-    if not game:
-        sys.exit("Hearts of Iron IV not found in the Steam libraries")
-    os.environ["SteamAppId"] = os.environ["SteamGameId"] = str(APP)
-    api = C.CDLL(os.path.join(os.path.dirname(game), "steam_api64.dll"))
+    dll = a.steam_api or (game and os.path.join(os.path.dirname(game), "steam_api64.dll"))
+    if not dll or not os.path.isfile(dll):
+        sys.exit("no steam_api64.dll: HOI4 is not in the Steam libraries; pass --steam-api")
+    api = C.CDLL(os.path.abspath(dll))
 
     def fn(name, restype, *argtypes):
         f = getattr(api, name)
         f.restype, f.argtypes = restype, list(argtypes)
         return f
 
-    def newest(prefix):  # the flat methods call through the DLL's own interface version: the newest one it exports
-        return fn(next(n for n in (f"{prefix}{v:03d}" for v in range(40, 0, -1)) if hasattr(api, n)), P)()
+    def newest(prefix):  # the flat methods call through the DLL's own interface version: the newest accessor it exports
+        versions = [v for v in range(1, 40) if hasattr(api, f"{prefix}{v:03d}")]
+        if not versions:
+            sys.exit(f"{dll} predates the flat API accessors (SDK 1.48); pass --steam-api with a newer steam_api64.dll")
+        return fn(f"{prefix}{max(versions):03d}", P)()
 
-    err = C.create_string_buffer(1024)
-    if fn("SteamAPI_InitFlat", C.c_int, C.c_char_p)(err) != 0:
-        sys.exit(f"Steam: {err.value.decode(errors='replace')} (running, and logged in with an account that owns HOI4?)")
+    # Steam reads the app id from steam_appid.txt in the working directory
+    cwd, err, ok = os.getcwd(), C.create_string_buffer(1024), False
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        with open(os.path.join(tmp, "steam_appid.txt"), "w") as f:
+            f.write(str(APP))
+        os.chdir(tmp)
+        try:
+            if hasattr(api, "SteamAPI_InitFlat"):  # SDK 1.58+
+                ok = fn("SteamAPI_InitFlat", C.c_int, P)(C.addressof(err)) == 0
+            else:
+                ok = fn("SteamAPI_Init", C.c_bool)()
+        except OSError as e:  # an access violation inside the DLL
+            sys.exit(f"{dll} crashed ({e}); if it is not Valve's own (a DLC unlocker replaces it), pass --steam-api")
+        finally:
+            os.chdir(cwd)
+    if not ok:
+        sys.exit(f"Steam API init failed {err.value.decode(errors='replace')}: is Steam running, logged in with an "
+                 "account that owns HOI4?")
     ugc, utils = newest("SteamAPI_SteamUGC_v"), newest("SteamAPI_SteamUtils_v")
     run_callbacks = fn("SteamAPI_RunCallbacks", None)
     completed = fn("SteamAPI_ISteamUtils_IsAPICallCompleted", C.c_bool, P, u64, C.POINTER(C.c_bool))
     call_result = fn("SteamAPI_ISteamUtils_GetAPICallResult", C.c_bool, P, u64, P, C.c_int, C.c_int, C.POINTER(C.c_bool))
 
     def wait(call, out, callback, tick=lambda: None):
+        if not call:
+            sys.exit(f"Steam refused call {callback} (no call handle)")
         failed = C.c_bool()
         while not completed(utils, call, C.byref(failed)):
             run_callbacks()

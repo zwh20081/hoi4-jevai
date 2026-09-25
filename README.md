@@ -6,7 +6,7 @@ reads each AI country's situation as text, scores six strategic postures, and th
 country's AI. The games JevAI collects are also its training data: decisions there are partly random with known odds,
 so what happened afterwards is a causal label for the posture taken.
 
-- The mod: [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=WORKSHOP_ID)
+- The mod: [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3808093078)
 - The model: [huggingface.co/zwh20081/hoi4-jevai](https://huggingface.co/zwh20081/hoi4-jevai) (`torch/` the PyTorch
   bundle, `openvino/` the graphs the mod runs)
 
@@ -19,7 +19,7 @@ one, otherwise on the CPU.
    and copy `temp/release/jevai` into `Documents\Paradox Interactive\Hearts of Iron IV\mod\`, with `jevai.mod` next
    to it.
 2. Start the companion runner from the mod's `runner` folder. For a Workshop subscription, that folder is
-   `<Steam library>\steamapps\workshop\content\394360\WORKSHOP_ID\runner`:
+   `<Steam library>\steamapps\workshop\content\394360\3808093078\runner`:
    - Run `install.cmd` once to copy the runner to `%LOCALAPPDATA%\jevai`, start it now, and start it at Windows sign-in.
    - Or run `jevai.exe` before each game, keep its console open while playing, and press Ctrl+C to stop it afterward.
      This does not add a Windows Startup entry.

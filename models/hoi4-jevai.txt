@@ -1,0 +1,2 @@
+https://huggingface.co/zwh20081/hoi4-jevai
+hf download zwh20081/hoi4-jevai --local-dir models/hoi4-jevai

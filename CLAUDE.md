@@ -39,15 +39,20 @@ python -m mods.collector --slots 3 --games 9    # VM; --status; restart with --a
 python -m mods.collector.jevd --model temp/train/<name>/best   # VM, next to the collector
 python -m trainer.export --model temp/train/<name>/best --out temp/ov/<name>   # OpenVINO IR (conda env `ov`)
 python -m mods.jevai.package --model temp/ov/<name>           # release: mod + jevai.exe runner + model (env `ov`)
+python -m mods.jevai.workshop temp/release/jevai --note "..."  # create/update the Workshop item via the Steam client
 ```
 
 ## Player runner (mods/jevai/runtime/runner.py)
 
-Players start the runner manually with `jevai.exe` before each game, or use `jevai.exe --install` (the release's
-`install.cmd`, run once) to add a Startup-folder shortcut that runs `jevai.exe --hidden` at logon and starts it;
-`--uninstall` removes both. The runner (one per user,
-named mutex) waits for `hoi4.exe`, loads the model when it appears (NPU compile ~2 min the first time, then from
-cache in ~0 s), steers that game until the process exits, frees the model and waits again (`runner.session`). No launch option, dump or console input: `scripted_effects/jevai_state.txt` (`jev_log_state`) logs a country's
+Players start the runner manually with `jevai.exe` before each game, or run `jevai.exe --install` once (the release's
+`install.cmd`): it copies the runner without the model to `%LOCALAPPDATA%\jevai\runner`, adds a Startup-folder shortcut
+that runs the copy with `--hidden --mod <mod folder>` at logon, and starts it; `--uninstall` removes the shortcut, the
+copy and the NPU cache. Running from the copy keeps the mod folder unlocked, so Steam can update the Workshop item;
+when HOI4 starts and the mod's `jevai.exe` differs from the copy (size, mtime), the copy runs the mod's
+`jevai.exe --install` and exits (`runner.updated_runner`). The runner (one per user, named mutex) waits for
+`hoi4.exe`, loads the model when it appears (NPU compile ~2 min the first time, then from cache in ~0 s), steers that
+game until the process exits, frees the model and waits again (`runner.session`). No launch option, dump or console
+input: `scripted_effects/jevai_state.txt` (`jev_log_state`) logs a country's
 state to `game.log` (`JEV|S` numbers, `T` stability/war support/ratios/posture, `G` ideology group key, `H`
 human-played, `MAJOR`, `N`/`E`/`A` one line per neighbour/enemy/ally), monthly for every country and, in the "major
 powers only" mode, weekly for major powers. `runner.GameLog` groups lines into bursts by game date and keeps each
@@ -58,15 +63,22 @@ and equipment requests are not available to scripts: the text shows 0 / omits th
 dump-built training text; everything else matched on 91/91 countries of a real month, `temp/checks/check_logpath.py`).
 Each completed burst is decided for the countries in it (every AI country monthly, or the majors weekly, per the
 start-of-game event in `events/jevai.txt`), keeping the current posture unless another scores `--stick` (0.01) higher,
-and written to `mod/jevai/history/units/JEVAI_orders.txt`; the mod's `on_daily` reloads it with `load_oob` (once per
-day, whatever the tags) and `jev_follow_orders` applies the posture to AI countries only. The runner logs to
-`runner/jevai.log`. Unverified in-game so far: that `load_oob` re-reads the file from disk on every call (`JEV|ACT`
+and written to `<mod>/history/units/JEVAI_orders.txt` (emptied when a new HOI4 process starts); the mod's `on_daily`
+reloads it with `load_oob` (once per day, whatever the tags) and `jev_follow_orders` applies the posture to AI
+countries only. The runner logs to `%LOCALAPPDATA%\jevai\jevai.log`. Unverified in-game so far: that `load_oob` re-reads the file from disk on every call (`JEV|ACT`
 lines in game.log show postures being applied).
 
 Load order: overhaul mods `replace_path` `common/on_actions`, `events`, `common/scripted_effects` and `history/units`,
 which drops those folders from every mod loaded before them, and mods load alphabetically unless a dependency says
 otherwise. The shipped `descriptor.mod` has no hard dependencies. `runner.patch_load_order` adds only enabled mods
-that use `replace_path` to `mod/jevai.mod` and `mod/jevai/descriptor.mod` at each start, effective at the next launch.
+that use `replace_path` to the mod's own `descriptor.mod` and the launcher's `.mod` file for it (`jevai.mod`, or
+`ugc_<id>.mod` for the Workshop item) at each start, effective at the next launch.
+
+Releases: code on GitHub `zwh20081/hoi4-jevai`, models on Hugging Face `zwh20081/hoi4-jevai` (`torch/`, `openvino/`),
+the mod on the Steam Workshop (item 3808093078). `mods.jevai.workshop` uploads `temp/release/jevai` through the running
+Steam client with a stock `steam_api64.dll` of Steamworks SDK 1.48+ (`--steam-api`, default the game's: a replaced or
+older one crashes or hits the wrong interface version); the item id is `remote_file_id` in `descriptor.mod`, the page
+text `workshop.txt`.
 
 - `trainer/export.py` writes two IR graphs of the same model, FP16, fixed shapes (1 x 512 tokens, 3 posture
   questions): `jev_npu.xml` uses `trainer/npu_attention.py` (relative-position gathers as one-hot matmuls, mask as an
@@ -79,7 +91,7 @@ that use `replace_path` to `mod/jevai.mod` and `mod/jevai/descriptor.mod` at eac
 ## Layout rules
 
 - `models/`: only `*.txt` download pointers are committed (`models/*/` is ignored). Weights never go into git; the
-  trained and OpenVINO models go to a Hugging Face repo later. The stock bundle lives in
+  trained and OpenVINO models are on Hugging Face (`models/hoi4-jevai.txt`). The stock bundle lives in
   `models/open-jev-deberta-v3-large/` and is the default `--init` / `--model`.
 - `mods/jevai/runtime/` is the torch-free core: game parsing (`game.py`), text and question wording (`text.py`),
   token packing (`pack.py`), postures (`postures.py`), console input (`console.py` + `console.ps1`). `datasets`,

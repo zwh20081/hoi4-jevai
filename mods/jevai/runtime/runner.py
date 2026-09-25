@@ -7,7 +7,7 @@ Launch the game through jevai.exe: it starts HOI4 with -dump_history (the launch
 history_dump/N.txt every game month) and compiles the model for the NPU while the game loads, so the ~75 s first
 compile overlaps HOI4's own load (later starts load the compiled model from cache). Every `--every` game months it
 scores all six postures for every AI country the player does not control and writes them to the mod's order file,
-<userdir>/mod/jevai/history/units/JEVAI_orders.txt. The mod reloads that file daily with load_oob and applies each
+<userdir>/mod/jevai/history/units/JEVAI_orders.txt. The mod reloads that file weekly with load_oob and applies each
 country's posture through its scripted effects, so the model steers the AI without any input into the game window.
 The runner exits when the game closes. --no-launch attaches to a game started some other way (with -dump_history).
 """
@@ -102,9 +102,10 @@ class Model:
 
 
 def orders_file(postures: dict[str, int], date: str, device: str) -> str:
-    """An OOB file whose instant_effect sets each country's wanted posture; the mod applies it to AI countries."""
-    lines = [f"# JevAI orders for {date} ({device}); rewritten by the runner, reloaded daily by the mod\n",
-             "instant_effect = {\n", f"\tset_global_flag = jevai_runner_alive\n"]
+    """An OOB file whose instant_effect sets each country's wanted posture; the mod applies it to AI countries.
+    It holds no units, so loading it changes nothing but those variables."""
+    lines = [f"# JevAI orders for {date} ({device}); rewritten by the runner, reloaded weekly by the mod\n",
+             "instant_effect = {\n"]
     for tag, k in sorted(postures.items()):
         lines.append(f"\tif = {{ limit = {{ country_exists = {tag} }} {tag} = {{ set_variable = {{ jev_want = {k} }} }} }}\n")
     lines.append("}\n")

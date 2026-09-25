@@ -4,13 +4,18 @@ on_actions = {
 			log = "JEV|START|[GetDateText]"
 		}
 	}
-	# The runner (runtime/runner.py) rewrites history/units/JEVAI_orders.txt with each AI country's wanted posture
-	# (jev_want). Reloading it every day picks up new orders without any console input; jev_follow_orders applies a
-	# posture only to AI countries and only when it changed.
-	on_daily = {
+	# The runner (jevai.exe) rewrites history/units/JEVAI_orders.txt with each AI country's wanted posture (jev_want).
+	# on_weekly runs once per country (ROOT = the country). Germany (always present in a 1936 start, and never removed
+	# as a tag) reloads the orders file for everyone once a week; every country then applies its own order.
+	# jev_follow_orders only touches AI countries and only when the wanted posture changed. No console input.
+	on_weekly_GER = {
 		effect = {
 			load_oob = "JEVAI_orders"
-			every_country = {
+		}
+	}
+	on_weekly = {
+		effect = {
+			if = {
 				limit = { has_variable = jev_want }
 				jev_follow_orders = yes
 			}

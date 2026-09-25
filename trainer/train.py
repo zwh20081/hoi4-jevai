@@ -2,7 +2,7 @@
 
     python -m trainer.train --out temp/train/<name> --bf16 [--epochs 1 | --steps N] [--bs 16] [--accum 2] [--lr 2e-5]
         [--freeze 0] [--grad-ckpt] [--eval-every 1000] [--val-states 1500] [--save-every 500] [--upsample 3]
-        [--max-states N] [--device xpu] [--train ...] [--val ...] [--init models/open-jev-deberta-v3-large]
+        [--max-states N] [--device cuda|xpu|cpu] [--train ...] [--val ...] [--init models/open-jev-deberta-v3-large]
     python -m trainer.train --out temp/train/<name> --resume [--stop-after N]
 
 States with a rare positive label or with posture questions are repeated --upsample times. An optimizer step takes
@@ -77,7 +77,7 @@ def main(argv=None):
     ap.add_argument("--train", default=os.path.join(ROOT, "temp", "dataset", "train.jsonl"))
     ap.add_argument("--val", default=os.path.join(ROOT, "temp", "dataset", "val.jsonl"))
     ap.add_argument("--init", default=MODEL, help="bundle to start from")
-    ap.add_argument("--device", default="xpu")
+    ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "xpu" if torch.xpu.is_available() else "cpu")
     ap.add_argument("--bf16", action="store_true")
     ap.add_argument("--grad-ckpt", action="store_true", help="gradient checkpointing: less memory, slower")
     ap.add_argument("--freeze", type=int, default=0, help="frozen encoder layers (of 24), from the bottom")
@@ -91,8 +91,11 @@ def main(argv=None):
     ap.add_argument("--save-every", type=int, default=500)
     ap.add_argument("--max-states", type=int, default=0, help="train on a random subset of states (0 = all)")
     ap.add_argument("--upsample", type=int, default=3)
-    ap.add_argument("--trim-every", type=int, default=10, help="empty the device memory cache every N steps (0 = never)")
+    ap.add_argument("--trim-every", type=int, default=None,
+                    help="empty the device memory cache every N steps (0 = never; default 10 on xpu, where the cache is host RAM)")
     a = ap.parse_args(argv)
+    if a.trim_every is None:
+        a.trim_every = 10 if a.device.startswith("xpu") else 0
     print(f"loading model and data for {a.out} (a few minutes) ...", flush=True)
     state_path = os.path.join(a.out, "state.pt")
     saved = torch.load(state_path, map_location="cpu", weights_only=False) if a.resume else None

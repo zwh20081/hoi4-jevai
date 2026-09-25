@@ -43,7 +43,9 @@ python -m mods.jevai.package --model temp/ov/<name>           # release: mod + j
 
 ## Player runner (mods/jevai/runtime/runner.py)
 
-Players start HOI4 with `-dump_history` and run `jevai.exe` (the frozen runner). Each `--every` game months it scores
+Players start the game through `jevai.exe` (the frozen runner): it launches HOI4 with `-dump_history` and compiles
+the model in a background thread while the game loads (measured: cold NPU compile 115 s vs game load 116 s, so no
+wait; later starts load from cache), then exits when the game closes. Each `--every` game months it scores
 all six postures for every non-player country and writes `mod/jevai/history/units/JEVAI_orders.txt`. The mod's
 `on_daily` reloads that file with `load_oob`; its `instant_effect` sets `jev_want`, and `jev_follow_orders` applies
 the posture to AI countries only. No console input. Unverified in-game so far: that `load_oob` re-reads the file

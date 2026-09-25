@@ -1,20 +1,25 @@
-"""The JevAI runner: reads the running game's monthly dumps, asks the model which posture each AI country should
-follow, and hands the choices to the mod. No Python install or console needed at play time; ships as jevai.exe.
+"""The JevAI runner: starts Hearts of Iron IV, reads its monthly dumps, asks the model which posture each AI country
+should follow, and hands the choices to the mod. No Python install or console needed at play time; ships as jevai.exe.
 
-    jevai.exe [--userdir "%USERPROFILE%\\Documents\\Paradox Interactive\\Hearts of Iron IV"] [--device auto|NPU|CPU|GPU]
+    jevai.exe [--game "...\\Hearts of Iron IV\\hoi4.exe"] [--userdir ...] [--device auto|NPU|CPU|GPU] [--no-launch]
 
-Needs the game started with -dump_history (the launch option that writes history_dump/N.txt every game month).
-Every `--every` game months it scores all six postures for every AI country the player does not control and writes
-them to the mod's order file: <userdir>/mod/jevai/history/units/JEVAI_orders.txt. The mod reloads that file daily with
-load_oob and applies each country's posture through its scripted effects, so the model steers the AI without any
-input into the game window.
+Launch the game through jevai.exe: it starts HOI4 with -dump_history (the launch option that writes
+history_dump/N.txt every game month) and compiles the model for the NPU while the game loads, so the ~75 s first
+compile overlaps HOI4's own load (later starts load the compiled model from cache). Every `--every` game months it
+scores all six postures for every AI country the player does not control and writes them to the mod's order file,
+<userdir>/mod/jevai/history/units/JEVAI_orders.txt. The mod reloads that file daily with load_oob and applies each
+country's posture through its scripted effects, so the model steers the AI without any input into the game window.
+The runner exits when the game closes. --no-launch attaches to a game started some other way (with -dump_history).
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
+import subprocess
 import sys
+import threading
 import time
 
 import numpy as np
@@ -29,6 +34,31 @@ ORDERS = "JEVAI_orders"  # load_oob name: history/units/JEVAI_orders.txt inside 
 
 def default_userdir() -> str:
     return os.path.join(os.path.expanduser("~"), "Documents", "Paradox Interactive", "Hearts of Iron IV")
+
+
+def find_game() -> str | None:
+    """hoi4.exe from Steam's library list (every library folder), or None."""
+    steam = os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Steam")
+    libs = [steam]
+    try:
+        with open(os.path.join(steam, "steamapps", "libraryfolders.vdf"), encoding="utf-8") as f:
+            libs += [p.replace("\\\\", "\\") for p in re.findall(r'"path"\s+"([^"]+)"', f.read())]
+    except OSError:
+        pass
+    for lib in libs:
+        exe = os.path.join(lib, "steamapps", "common", "Hearts of Iron IV", "hoi4.exe")
+        if os.path.isfile(exe):
+            return exe
+    return None
+
+
+def launch_game(exe: str, userdir: str, extra: list[str]) -> subprocess.Popen:
+    """Start HOI4 with -dump_history (the runner reads its monthly dumps); the launcher is skipped, so the mod set
+    is the one last saved by the launcher in <userdir>/dlc_load.json."""
+    args = [exe, "-dump_history", "-nolauncher", *extra]
+    if os.path.normcase(os.path.abspath(userdir)) != os.path.normcase(default_userdir()):
+        args.append(f"-userdir={userdir}")
+    return subprocess.Popen(args, cwd=os.path.dirname(exe))
 
 
 def here() -> str:
@@ -89,7 +119,10 @@ def write_atomic(path: str, text: str):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="JevAI runner: the model picks AI postures in your HOI4 game")
+    ap = argparse.ArgumentParser(description="JevAI runner: starts HOI4; the model picks AI postures in your game")
+    ap.add_argument("--game", default=None, help="path to hoi4.exe (default: found through Steam)")
+    ap.add_argument("--no-launch", action="store_true", help="attach to a game started some other way (with -dump_history)")
+    ap.add_argument("--game-args", default="", help="extra HOI4 launch options, space separated")
     ap.add_argument("--userdir", default=default_userdir())
     ap.add_argument("--model", default=os.path.join(here(), "model"))
     ap.add_argument("--device", default="auto", choices=["auto", "NPU", "CPU", "GPU"])
@@ -102,10 +135,40 @@ def main(argv=None):
     out_dir = os.path.join(a.userdir, "mod", "jevai", "history", "units")
     if not os.path.isdir(out_dir):
         sys.exit(f"JevAI mod not found in {os.path.join(a.userdir, 'mod', 'jevai')}; install it first")
-    model = Model(a.model, a.device)
-    print(f"watching {dump} (start HOI4 with the -dump_history launch option)", flush=True)
-    done, st_center = set(), None
+
+    # the model compiles while the game loads: start the game first, then compile in the background
+    game = None
+    if not a.no_launch:
+        exe = a.game or find_game()
+        if not exe:
+            sys.exit("hoi4.exe not found through Steam; pass --game <path to hoi4.exe> (or --no-launch)")
+        game = launch_game(exe, a.userdir, a.game_args.split())
+        print(f"started HOI4 (pid {game.pid}) with -dump_history; preparing the model while it loads", flush=True)
+    ready: dict = {}
+
+    def prepare():
+        try:
+            ready["model"] = Model(a.model, a.device)
+        except Exception as e:  # noqa: BLE001 - reported below; the game keeps running without the model
+            ready["error"] = e
+
+    loader = threading.Thread(target=prepare, daemon=True)
+    loader.start()
+    print(f"watching {dump}", flush=True)
+    done, st_center, model = set(), None, None
     while True:
+        if game is not None and game.poll() is not None:
+            print("HOI4 closed; JevAI runner exits", flush=True)
+            return
+        if model is None:
+            if "error" in ready:
+                sys.exit(f"model failed to load: {ready['error']}")
+            if loader.is_alive():
+                time.sleep(1)
+                continue
+            model = ready["model"]
+            # months the game wrote while the model compiled are history; decide from the newest one on
+            done = {os.path.basename(p) for p in (month_files(dump)[:-1] if os.path.isdir(dump) else [])}
         fs = month_files(dump) if os.path.isdir(dump) else []
         if not fs or os.path.basename(fs[-1]) in done:
             time.sleep(2)

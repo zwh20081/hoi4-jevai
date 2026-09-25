@@ -1,4 +1,20 @@
-version="0.1.0"
+version="0.2.0"
 name="JevAI"
 supported_version="1.19.*"
 tags={ "Utilities" }
+dependencies = {
+	"Equestria at War"
+	"Extremis Ultimis Demo: The Death of Democracy"
+	"KaiserreduX"
+	"Kaiserreich"
+	"Millennium Dawn: A Modern Day Mod"
+	"Old World Blues"
+	"Pax Britannica: An Imperial Timeline"
+	"Red Flood"
+	"TNO: Requiem"
+	"The Fire Rises"
+	"The Great War Redux"
+	"The New Order: Last Days of Europe"
+	"The Road to 56"
+	"Thousand Week Reich"
+}

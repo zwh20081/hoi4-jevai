@@ -5,7 +5,7 @@ needed) and the exported model next to it.
 
 Layout of the release (copy the folder into Documents/Paradox Interactive/Hearts of Iron IV/mod/ and add jevai.mod):
     jevai/descriptor.mod, common/, events/, localisation/, history/  the HOI4 mod
-    jevai/runner/jevai.exe (+ _internal/)                           the runner
+    jevai/runner/jevai.exe (+ _internal/), *.cmd                    the runner and its two launch shortcuts
     jevai/runner/model/                                             jev_npu.xml/.bin, jev_cpu.xml/.bin, tokenizer.json, jev.json
     jevai.mod                                                       descriptor for the launcher (path = mod/jevai)
 """
@@ -44,6 +44,10 @@ def main(argv=None):
     shutil.move(os.path.join(out, "runner_dist", "jevai"), os.path.join(out, "runner"))
     os.rmdir(os.path.join(out, "runner_dist"))
     shutil.copytree(a.model, os.path.join(out, "runner", "model"))
+    for name, args, note in (("start_hoi4_with_jevai.cmd", "", "Starts HOI4 and the JevAI model together."),
+                             ("attach_to_running_game.cmd", " --no-launch", "Use when HOI4 was started from the Paradox launcher.")):
+        with open(os.path.join(out, "runner", name), "w", encoding="utf-8", newline="\r\n") as f:
+            f.write(f'@echo off\nrem {note}\n"%~dp0jevai.exe"{args}\npause\n')
     with open(os.path.join(HERE, "descriptor.mod"), encoding="utf-8-sig") as f:
         desc = f.read().rstrip()
     with open(os.path.join(os.path.dirname(out), "jevai.mod"), "w", encoding="utf-8") as f:

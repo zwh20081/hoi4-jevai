@@ -17,32 +17,41 @@ on_actions = {
 		}
 	}
 	# The runner (jevai.exe) rewrites history/units/JEVAI_orders.txt with each AI country's wanted posture (jev_want).
-	# on_weekly runs once per country (ROOT = the country). Germany (always present in a 1936 start, and never removed
-	# as a tag) reloads the orders file for everyone once a week; every country then applies its own order.
-	# jev_follow_orders only touches AI countries and only when the wanted posture changed. No console input.
-	on_weekly_GER = {
-		effect = {
-			load_oob = "JEVAI_orders"
-		}
-	}
+	# on_weekly runs once per country (ROOT = the country). The first country each week reloads the orders file for
+	# everyone (the timed global flag keeps it to one load per week, whatever tags the mod set has); every country then
+	# applies its own order. jev_follow_orders only touches AI countries and only when the wanted posture changed.
 	on_weekly = {
 		effect = {
+			if = {
+				limit = { NOT = { has_global_flag = jevai_orders_loaded } }
+				set_global_flag = { flag = jevai_orders_loaded value = 1 days = 6 }
+				load_oob = "JEVAI_orders"
+			}
 			if = {
 				limit = { has_variable = jev_want }
 				jev_follow_orders = yes
 			}
 		}
 	}
-	# Passive telemetry only: one line per country per month with the fields -dump_history lacks.
-	# Parsed by mods/jevai/runtime/game.py parse_logs (the line also lands in the dump's `logs` list).
-	# P = cumulative equipment produced by category (lets us measure what a posture changed),
-	# pos = the Jev posture in force (0 = none / vanilla).
+	# Monthly telemetry, one burst per month on the 1st. T and P also land in -dump_history's `logs` (training data).
+	# S/G/H/N/E/A are what the runner reads from game.log instead of the dump, so players need no launch option:
+	# S = the numbers of the state text, G = ideology group key (language independent), H = a human-played country,
+	# N/E/A = one line per neighbour / enemy / ally.
 	on_monthly = {
 		effect = {
 			if = {
 				limit = { num_of_controlled_states > 0 }
 				log = "JEV|T|[ROOT.GetTag]|ideo=[ROOT.GetRulingIdeology]|fac=[ROOT.GetFactionName]|stab=[?ROOT.stability|2]|ws=[?ROOT.has_war_support|2]|str=[?ROOT.enemies_strength_ratio|2]|astr=[?ROOT.alliance_strength_ratio|2]|surr=[?ROOT.surrender_progress|2]|pp=[?ROOT.political_power|0]|mp=[?ROOT.manpower_k|0]|cas=[?ROOT.casualties_k|0]|subj=[?ROOT.num_subjects|0]|pos=[?ROOT.jev_posture|0]"
+				log = "JEV|S|[ROOT.GetTag]|name=[ROOT.GetName]|mil=[?ROOT.num_of_military_factories|0]|civ=[?ROOT.num_of_civilian_factories|0]|nav=[?ROOT.num_of_naval_factories|0]|st=[?ROOT.num_of_controlled_states|0]|div=[?ROOT.num_divisions|0]|mpmax=[?ROOT.max_manpower_k|0]"
+				if = { limit = { has_government = fascism } log = "JEV|G|[ROOT.GetTag]|fascism" }
+				if = { limit = { has_government = communism } log = "JEV|G|[ROOT.GetTag]|communism" }
+				if = { limit = { has_government = democratic } log = "JEV|G|[ROOT.GetTag]|democratic" }
+				if = { limit = { has_government = neutrality } log = "JEV|G|[ROOT.GetTag]|neutrality" }
+				if = { limit = { is_ai = no } log = "JEV|H|[ROOT.GetTag]" }
 				if = { limit = { is_major = yes } log = "JEV|MAJOR|[ROOT.GetTag]" }
+				every_neighbor_country = { log = "JEV|N|[ROOT.GetTag]|[THIS.GetTag]" }
+				every_enemy_country = { log = "JEV|E|[ROOT.GetTag]|[THIS.GetTag]" }
+				every_allied_country = { log = "JEV|A|[ROOT.GetTag]|[THIS.GetTag]" }
 				log = "JEV|P|[ROOT.GetTag]|inf=[?ROOT.total_equipment_produced_infantry|0]|art=[?ROOT.total_equipment_produced_artillery|0]|at=[?ROOT.total_equipment_produced_anti_tank|0]|aa=[?ROOT.total_equipment_produced_anti_air|0]|arm=[?ROOT.total_equipment_produced_armor|0]|mot=[?ROOT.total_equipment_produced_motorized|0]|fig=[?ROOT.total_equipment_produced_fighter|0]|cas=[?ROOT.total_equipment_produced_cas|0]|tac=[?ROOT.total_equipment_produced_tactical_bomber|0]|nav=[?ROOT.total_equipment_produced_naval_bomber|0]|scr=[?ROOT.total_equipment_produced_screen_ship|0]|cap=[?ROOT.total_equipment_produced_capital_ship|0]|sub=[?ROOT.total_equipment_produced_submarine|0]|bld=[?ROOT.total_constructed_civilian_factory|0]/[?ROOT.total_constructed_military_factory|0]/[?ROOT.total_constructed_dockyard|0]"
 			}
 		}

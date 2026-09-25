@@ -2,3 +2,4 @@ temp/
 models/*/
 .venv/
 __pycache__/
+*.log

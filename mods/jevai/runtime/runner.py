@@ -1,8 +1,8 @@
-"""The JevAI runner: waits in the background for Hearts of Iron IV, reads the mod's state lines from game.log, asks the
+r"""The JevAI runner: waits in the background for Hearts of Iron IV, reads the mod's state lines from game.log, asks the
 model which posture each AI country should follow, and hands the choices to the mod. No Python install, launch option,
 dump or console input needed; players only use the Paradox launcher. Ships as jevai.exe.
 
-    jevai.exe --install      start JevAI with Windows (a hidden Startup-folder shortcut) and right away
+    jevai.exe --install      copy the runner to %LOCALAPPDATA%\jevai, start it with Windows (hidden) and right away
     jevai.exe --uninstall    remove that and stop the background runner
     jevai.exe                run in this window: wait for HOI4, steer it while it runs, repeat
 
@@ -10,10 +10,12 @@ The mod logs each country's state to game.log (scripted_effects/jevai_state.txt:
 country on the 1st of each month and, in the "major powers only" mode, the major powers every week. When HOI4 starts,
 the runner loads the model (NPU if present, else CPU; the first NPU compile takes ~2 min, later loads come from cache),
 rebuilds the model's state text from each update and decides for the countries in it: every AI country monthly, or
-the major powers weekly. It writes the choices to <userdir>/mod/jevai/history/units/JEVAI_orders.txt; the mod reloads
-that file daily with load_oob and applies each posture through its scripted effects. When the game closes it frees
-the model and waits for the next one. It also keeps JevAI loading after every installed overhaul mod
-(patch_load_order).
+the major powers weekly. It writes the choices to <mod>/history/units/JEVAI_orders.txt; the mod reloads that file
+daily with load_oob and applies each posture through its scripted effects. When the game closes it frees the model and
+waits for the next one. It also keeps JevAI loading after every installed overhaul mod (patch_load_order).
+
+The installed runner is a copy outside the mod folder, so it never locks the mod's files and Steam can update the
+Workshop item; when HOI4 starts and the mod's jevai.exe differs from the copy, the copy reinstalls from it.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -40,6 +43,7 @@ LINE = re.compile(r"^\[[^\]]*\]\[(\d+)\.(\d+)\.(\d+)\.\d+\]\[[^\]]*\]: (JEV\|.*?
 KINDS = {"S", "T", "G", "H", "N", "E", "A", "MAJOR"}
 LOC_NAME = re.compile(r'^\s*([A-Z][A-Z0-9]{2}(?:_(?:fascism|communism|democratic|neutrality))?):\d*\s*"(.*)"\s*$')
 NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW for helper processes
+HOME = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "jevai")  # runner copy, NPU cache, log
 
 
 def default_userdir() -> str:
@@ -73,28 +77,55 @@ STARTUP_LINK = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows
                             "JevAI.lnk")
 
 
-def install(exe: str):
-    """A Startup-folder shortcut that runs `jevai.exe --hidden` at every logon, then start it now."""
+def install(mod: str):
+    """Copy the runner (not the model) to HOME/runner, add a Startup-folder shortcut that runs the copy hidden for this
+    mod folder at every logon, and start it now."""
+    stop_others()
+    src, dst = here(), os.path.join(HOME, "runner")
+    if os.path.normcase(src) != os.path.normcase(dst):
+        shutil.rmtree(dst, ignore_errors=True)
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("model", "*.log", "*.cmd"), dirs_exist_ok=True)
+    exe = os.path.join(dst, "jevai.exe")
     q = lambda s: s.replace("'", "''")  # noqa: E731 - PowerShell single-quoted string
     subprocess.run(["powershell", "-NoProfile", "-Command",
                     f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{q(STARTUP_LINK)}');$s.TargetPath='{q(exe)}';"
-                    f"$s.Arguments='--hidden';$s.WorkingDirectory='{q(os.path.dirname(exe))}';$s.WindowStyle=7;$s.Save()"],
+                    f"$s.Arguments='--hidden --mod \"{q(mod)}\"';$s.WorkingDirectory='{q(dst)}';$s.WindowStyle=7;$s.Save()"],
                    check=True, capture_output=True, creationflags=NO_WINDOW)
-    if not pids_of_others("jevai.exe"):
-        os.startfile(STARTUP_LINK)
-    print(f"JevAI starts with Windows ({STARTUP_LINK}) and is running now. Just play from the Paradox launcher.")
+    os.startfile(STARTUP_LINK)
+    print(f"JevAI is installed in {dst}, starts with Windows and is running now. Just play from the Paradox launcher.")
 
 
 def uninstall():
     if os.path.exists(STARTUP_LINK):
         os.remove(STARTUP_LINK)
-    for pid in pids_of_others("jevai.exe"):
-        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, creationflags=NO_WINDOW)
-    print("JevAI no longer starts with Windows, and the background runner is stopped.")
+    stop_others()
+    for d in ("runner", "ov_cache"):  # only what the runner made: HOME can also hold the collector's inst/
+        shutil.rmtree(os.path.join(HOME, d), ignore_errors=True)
+    print("JevAI no longer starts with Windows; the background runner, its copy and its model cache are removed.")
 
 
 def pids_of_others(image: str) -> list[int]:
     return [p for p in pids(image) if p != os.getpid()]
+
+
+def stop_others():
+    """Stop every other jevai.exe (the background runner) and wait until they are gone and their files unlocked."""
+    for pid in pids_of_others("jevai.exe"):
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, creationflags=NO_WINDOW)
+    for _ in range(40):
+        if not pids_of_others("jevai.exe"):
+            return
+        time.sleep(0.25)
+
+
+def updated_runner(mod: str) -> str | None:
+    """The mod's jevai.exe if this process is the installed copy and the mod's runner has changed since (a Workshop
+    update): copytree keeps size and mtime, so any difference means a new version."""
+    src = os.path.join(mod, "runner", "jevai.exe")
+    if not getattr(sys, "frozen", False) or not os.path.isfile(src) or os.path.normcase(here()) == os.path.normcase(os.path.dirname(src)):
+        return None
+    a, b = os.stat(src), os.stat(sys.executable)
+    return src if (a.st_size, int(a.st_mtime)) != (b.st_size, int(b.st_mtime)) else None
 
 
 def here() -> str:
@@ -115,26 +146,35 @@ def _mod_root(userdir: str, descriptor_text: str) -> str | None:
     return None if not p else p.group(1) if os.path.isabs(p.group(1)) else os.path.join(userdir, p.group(1))
 
 
-def patch_load_order(userdir: str) -> list[str]:
+def patch_load_order(userdir: str, mod: str) -> list[str]:
     """Overhaul mods list folders under replace_path, which drops those folders (on_actions, events, scripted effects,
     history/units) from every mod loaded before them, and mods load alphabetically unless a dependency says otherwise.
-    So JevAI declares every installed mod that uses replace_path as a dependency and loads after it. The launcher and
-    the game read the change at their next start."""
+    Declare only enabled replace_path mods as dependencies so JevAI loads after them. Write the mod's descriptor.mod
+    and the launcher's .mod file (jevai.mod, or ugc_<id>.mod for the Workshop item). The launcher and the game read
+    the change at their next start."""
     moddir = os.path.join(userdir, "mod")
-    names = set()
+    names, ours = set(), [os.path.join(mod, "descriptor.mod")]
+    try:
+        enabled = json.loads(_read(os.path.join(userdir, "dlc_load.json"))).get("enabled_mods", [])
+    except ValueError:
+        enabled = []
+    enabled = {os.path.normcase(os.path.normpath(os.path.join(userdir, f))) for f in enabled}
     for f in glob.glob(os.path.join(moddir, "*.mod")):
         text = _read(f)
         name = re.search(r'^\s*name\s*=\s*"([^"]+)"', text, re.M)
-        if not name or name.group(1) == "JevAI":
+        if not name:
+            continue
+        if name.group(1) == "JevAI":
+            ours.append(f)
+            continue
+        if os.path.normcase(os.path.normpath(f)) not in enabled:
             continue
         root = _mod_root(userdir, text)
         if "replace_path" in text or (root and "replace_path" in _read(os.path.join(root, "descriptor.mod"))):
             names.add(name.group(1))
     block_re = re.compile(r"\n?dependencies\s*=\s*\{([^}]*)\}\s*")
-    shipped = block_re.search(_read(os.path.join(moddir, "jevai", "descriptor.mod")))
-    names |= set(re.findall(r'"([^"]+)"', shipped.group(1))) if shipped else set()  # the well-known list stays too
-    block = "dependencies = {\n" + "".join(f'\t"{n}"\n' for n in sorted(names)) + "}\n"
-    for f in (os.path.join(moddir, "jevai.mod"), os.path.join(moddir, "jevai", "descriptor.mod")):
+    block = ("dependencies = {\n" + "".join(f'\t"{n}"\n' for n in sorted(names)) + "}\n") if names else ""
+    for f in ours:
         text = _read(f)
         if not text:
             continue
@@ -282,7 +322,7 @@ class Model:
         if device == "auto":
             device = "NPU" if "NPU" in devices else "CPU"
         self.device = device
-        cache = os.path.join(os.environ.get("LOCALAPPDATA") or model_dir, "jevai", "ov_cache")
+        cache = os.path.join(HOME, "ov_cache")
         os.makedirs(cache, exist_ok=True)
         core.set_property({"CACHE_DIR": cache})  # the NPU compile happens once per model and driver
         graph = self.cfg["graphs"].get(device, self.cfg["graphs"]["CPU"])
@@ -324,7 +364,7 @@ def write_atomic(path: str, text: str):
 
 
 class Tee:
-    """Runner output goes to the console and to jevai.log next to jevai.exe, readable after the window closes."""
+    """Runner output goes to the console and to HOME/jevai.log, readable after the window closes."""
 
     def __init__(self, *streams):
         self.streams = streams
@@ -353,6 +393,7 @@ def session(a, out_dir: str, pid: int):
 
     loader = threading.Thread(target=prepare, daemon=True)
     loader.start()
+    write_atomic(os.path.join(out_dir, ORDERS + ".txt"), orders_file({}, "no update yet", "-"))  # not the last game's
     log = GameLog(a.userdir)
     model = names_en = None
     checked = time.time()
@@ -408,19 +449,22 @@ def main(argv=None):
     ap.add_argument("--uninstall", action="store_true", help="stop starting with Windows and stop the background runner")
     ap.add_argument("--hidden", action="store_true", help="no window (how the Startup shortcut runs it)")
     ap.add_argument("--userdir", default=default_userdir())
-    ap.add_argument("--model", default=os.path.join(here(), "model"))
+    ap.add_argument("--mod", default=os.path.dirname(here()), help="the JevAI mod folder (default: the one jevai.exe is in)")
+    ap.add_argument("--model", help="exported model folder (default: <mod>/runner/model)")
     ap.add_argument("--device", default="auto", choices=["auto", "NPU", "CPU", "GPU"])
     ap.add_argument("--horizon", type=int, default=6, help="months the posture questions look ahead")
     ap.add_argument("--stick", type=float, default=0.01, help="keep the current posture unless another scores this much higher")
     ap.add_argument("--min-factories", type=int, default=20, help="skip countries with fewer military + civilian factories")
     ap.add_argument("--player", default="", help="extra tag(s) never to steer, comma separated (humans are excluded anyway)")
     a = ap.parse_args(argv)
+    a.mod = os.path.abspath(a.mod)
+    a.model = a.model or os.path.join(a.mod, "runner", "model")
     if a.install or a.uninstall:
         if a.uninstall:
             return uninstall()
         if not getattr(sys, "frozen", False):
             sys.exit("--install works from jevai.exe")
-        return install(sys.executable)
+        return install(a.mod)
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     if a.hidden:
         ctypes.windll.user32.ShowWindow(k32.GetConsoleWindow(), 0)
@@ -428,14 +472,15 @@ def main(argv=None):
     if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
         sys.exit("JevAI is already running")
     sys.stdout.reconfigure(errors="replace")  # mod names can be in any script; a redirected cp1252 stdout must not crash
-    sys.stdout = Tee(sys.stdout, open(os.path.join(here(), "jevai.log"), "a", encoding="utf-8"))
-    print(f"\n=== JevAI runner started {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
-    out_dir = os.path.join(a.userdir, "mod", "jevai", "history", "units")
+    os.makedirs(HOME, exist_ok=True)
+    sys.stdout = Tee(sys.stdout, open(os.path.join(HOME, "jevai.log"), "a", encoding="utf-8"))
+    print(f"\n=== JevAI runner started {time.strftime('%Y-%m-%d %H:%M:%S')} for {a.mod}", flush=True)
+    out_dir = os.path.join(a.mod, "history", "units")
     if not os.path.isdir(out_dir):
-        sys.exit(f"JevAI mod not found in {os.path.join(a.userdir, 'mod', 'jevai')}; install it first")
+        sys.exit(f"JevAI mod not found in {a.mod}; run install.cmd from the mod's runner folder")
     n_deps = None
     while True:
-        deps = patch_load_order(a.userdir)  # before each game, so a newly installed overhaul is covered
+        deps = patch_load_order(a.userdir, a.mod)  # before each game, so a newly installed overhaul is covered
         if len(deps) != n_deps:
             n_deps = len(deps)
             print(f"JevAI loads after {n_deps} overhaul mods (read by the launcher at its next start)", flush=True)
@@ -443,6 +488,10 @@ def main(argv=None):
         while not (running := pids("hoi4.exe")):
             time.sleep(5)
         print(f"[{time.strftime('%H:%M:%S')}] HOI4 started (pid {running[0]}); loading the model", flush=True)
+        if src := updated_runner(a.mod):  # Steam updated the mod: the new runner reinstalls itself and takes over
+            print(f"the mod's runner was updated; reinstalling from {src}", flush=True)
+            subprocess.Popen([src, "--install", "--mod", a.mod], creationflags=NO_WINDOW)
+            return
         session(a, out_dir, running[0])
         print(f"[{time.strftime('%H:%M:%S')}] HOI4 closed", flush=True)
     del mutex

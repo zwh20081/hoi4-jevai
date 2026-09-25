@@ -12,7 +12,7 @@ labels or training.
 ## Two machines
 
 - **VM** (VMware Windows guest) runs the games: `python -m mods.collector` and `python -m mods.collector.jevd`, CPU
-  inference. It mounts this folder as `Z:\hoi4jevai`. `.venv/` is the VM's env (uv, CPU torch, base Python only in the
+  inference. It mounts this folder as a shared drive. `.venv/` is the VM's env (uv, CPU torch, base Python only in the
   VM); it does not run on the host.
 - **Host** (this machine) trains on an Intel Arc B390 iGPU (torch XPU, shares host RAM) in the conda env `py313`.
   Setup: `conda activate py313`, `uv pip install torch torchvision --index-url https://download.pytorch.org/whl/xpu`,
@@ -43,8 +43,9 @@ python -m mods.jevai.package --model temp/ov/<name>           # release: mod + j
 
 ## Player runner (mods/jevai/runtime/runner.py)
 
-Players only use the Paradox launcher. `jevai.exe --install` (the release's `install.cmd`, run once) adds a Startup-folder
-shortcut that runs `jevai.exe --hidden` at logon and starts it; `--uninstall` removes both. The runner (one per user,
+Players start the runner manually with `jevai.exe` before each game, or use `jevai.exe --install` (the release's
+`install.cmd`, run once) to add a Startup-folder shortcut that runs `jevai.exe --hidden` at logon and starts it;
+`--uninstall` removes both. The runner (one per user,
 named mutex) waits for `hoi4.exe`, loads the model when it appears (NPU compile ~2 min the first time, then from
 cache in ~0 s), steers that game until the process exits, frees the model and waits again (`runner.session`). No launch option, dump or console input: `scripted_effects/jevai_state.txt` (`jev_log_state`) logs a country's
 state to `game.log` (`JEV|S` numbers, `T` stability/war support/ratios/posture, `G` ideology group key, `H`
@@ -64,8 +65,8 @@ lines in game.log show postures being applied).
 
 Load order: overhaul mods `replace_path` `common/on_actions`, `events`, `common/scripted_effects` and `history/units`,
 which drops those folders from every mod loaded before them, and mods load alphabetically unless a dependency says
-otherwise. `descriptor.mod` lists well-known overhauls as dependencies, and `runner.patch_load_order` adds every
-installed mod that uses `replace_path` to `mod/jevai.mod` and `mod/jevai/descriptor.mod` at each start.
+otherwise. The shipped `descriptor.mod` has no hard dependencies. `runner.patch_load_order` adds only enabled mods
+that use `replace_path` to `mod/jevai.mod` and `mod/jevai/descriptor.mod` at each start, effective at the next launch.
 
 - `trainer/export.py` writes two IR graphs of the same model, FP16, fixed shapes (1 x 512 tokens, 3 posture
   questions): `jev_npu.xml` uses `trainer/npu_attention.py` (relative-position gathers as one-hot matmuls, mask as an
@@ -140,6 +141,6 @@ Contracts that span files:
 - `-ogl`: D3D11 crashed when a second instance loaded under VMware. About 5.6 GB per instance; launches are staggered.
 - Fresh 1936 starts crash around June 1936, so games start from 1936-06-01 saves via `continue_game.json` +
   `-continuelastsave`, with no menu clicks.
-- `launch.ps1` finds the game through `$env:HOI4_EXE` (the default is the VM's install path). Live userdirs stay on
+- `launch.ps1` finds the game through `$env:HOI4_EXE` (set this to the full path of `hoi4.exe`). Live userdirs stay on
   the VM's local disk (`JEVAI_SCRATCH`) because the shared folder is too slow; `temp/hoi4user/` is only copied from,
   and its `dlc_load.json` enables `mod/jevai.mod`.

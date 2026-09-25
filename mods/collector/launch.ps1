@@ -2,7 +2,10 @@
 #   powershell -File launch.ps1 -gameArgs "-ogl;-dump_history" -userdir C:\jevai\u1 -pidfile temp\inst\u1.pid
 param([string]$gameArgs = "", [string]$userdir = "", [string]$pidfile = "")
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
-$game = if ($env:HOI4_EXE) { $env:HOI4_EXE } else { "C:\Users\zwh20081\Desktop\h4\hoi4.exe" }  # the game install is outside the project
+$game = $env:HOI4_EXE
+if (-not $game -or -not (Test-Path -LiteralPath $game -PathType Leaf)) {
+    throw "Set HOI4_EXE to the full path of hoi4.exe before starting the collector."
+}
 if (-not $userdir) { $userdir = "temp\hoi4user" }
 if (-not [IO.Path]::IsPathRooted($userdir)) { $userdir = Join-Path $root $userdir }
 $user = (Resolve-Path $userdir).Path

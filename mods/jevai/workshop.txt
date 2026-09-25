@@ -1,0 +1,61 @@
+[h1]A trained model runs the AI's strategy[/h1]
+
+JevAI lets a neural network choose the strategic posture of AI countries. On every update, a DeBERTa-v3-large model trained on data from 33 observer games reads each country's situation: factories, divisions, manpower, stability, war support, strength ratios, enemies, allies and neighbours. It predicts how each of six postures would work out over the next six months, and the mod applies the best one:
+
+[list]
+[*]defensive buildup
+[*]industrial expansion
+[*]armored offensive
+[*]air power
+[*]naval power
+[*]total war economy
+[/list]
+
+A posture changes only what the AI prioritizes: unit mix, production, factory ratios and construction. It gives no bonuses, and your own country is never touched.
+
+[h2]Setup[/h2]
+Subscribe first. The item is about 2.5 GB because the model is included. Open [b]<your Steam library>\steamapps\workshop\content\394360\{id}\runner[/b] (for example C:\Program Files (x86)\Steam\steamapps\workshop\content\394360\{id}\runner), then choose how to start the companion runner:
+
+[list]
+[*][b]Start automatically with Windows:[/b] Run [b]install.cmd[/b] once. It copies the runner to %LOCALAPPDATA%\jevai, starts it now, and adds it to Windows Startup. To stop automatic startup and the running copy, run [b]uninstall.cmd[/b] from the same Workshop folder.
+[*][b]Start manually each time:[/b] Double-click [b]jevai.exe[/b] in the runner folder before launching the game. Keep its console window open while playing; press Ctrl+C in that window when finished. Repeat this each time you play. No startup entry is created.
+[/list]
+
+If Windows SmartScreen warns about the unsigned jevai.exe, choose "More info", then "Run anyway". Start Hearts of Iron IV from the Paradox launcher with JevAI in your playset. The runner waits for the game, steers it while it runs and waits again when you quit. It uses no network.
+
+[h2]In game[/h2]
+At the start of each game, an event asks who the model commands:
+[list]
+[*][b]Major powers only[/b]: decided every week
+[*][b]All AI countries[/b]: decided every month (countries with at least 20 factories)
+[*][b]None[/b]: vanilla AI
+[/list]
+
+The first game after installing compiles the model for the NPU, which takes about 2 minutes while the game loads. Later games load it from a cache. A decision takes about 1.5 seconds per country on an Intel NPU, and longer on a CPU; the game keeps running meanwhile. The log, with one line per update, is %LOCALAPPDATA%\jevai\jevai.log.
+
+[h2]Good to know[/h2]
+[list]
+[*]Windows 10 or 11, 64-bit, and Hearts of Iron IV 1.19. The model runs on an Intel NPU (Core Ultra) if you have one, otherwise on the CPU.
+[*]Overhaul mods: JevAI puts itself after them in the load order, but the model was trained on vanilla 1936 games, so it has not seen other settings.
+[*]Multiplayer is not supported: each player's game would read its own orders.
+[/list]
+
+[h2]Source and model[/h2]
+[list]
+[*]Source code, training pipeline and measurements: [url=https://github.com/zwh20081/hoi4-jevai]github.com/zwh20081/hoi4-jevai[/url]
+[*]The model (PyTorch and OpenVINO): [url=https://huggingface.co/zwh20081/hoi4-jevai]huggingface.co/zwh20081/hoi4-jevai[/url]
+[/list]
+Apache-2.0.
+
+[h2]简体中文[/h2]
+JevAI 让训练好的神经网络为 AI 国家选择战略姿态（防御建设、工业扩张、装甲攻势、空中力量、海军力量、全面战争经济）。姿态只改变 AI 的优先事项，不提供任何加成，也不会影响玩家自己的国家。
+订阅本模组（约 2.5 GB，含模型），打开 [b]<Steam 库>\steamapps\workshop\content\394360\{id}\runner[/b]，选择一种启动方式：
+[list]
+[*][b]随 Windows 自动启动：[/b]运行一次 [b]install.cmd[/b]，它会立即启动后台程序，并加入开机启动。若要移除，运行同一文件夹里的 [b]uninstall.cmd[/b]。
+[*][b]每次手动启动：[/b]在开始游戏前双击 [b]jevai.exe[/b]，游玩时保持命令窗口打开；结束后在窗口中按 Ctrl+C。下次游玩需要再次启动。
+[/list]
+若 SmartScreen 提示，请选择“更多信息”→“仍要运行”。在 Paradox 启动器中启用 JevAI 并启动游戏。开局事件中可选择：仅主要国家（每周决策）、所有 AI 国家（每月决策）或不启用。
+
+首次游戏会为 NPU 编译模型（约 2 分钟，与游戏加载同时进行）。日志：%LOCALAPPDATA%\jevai\jevai.log。不支持多人游戏。
+
+源代码：[url=https://github.com/zwh20081/hoi4-jevai]github.com/zwh20081/hoi4-jevai[/url]；模型：[url=https://huggingface.co/zwh20081/hoi4-jevai]huggingface.co/zwh20081/hoi4-jevai[/url]。

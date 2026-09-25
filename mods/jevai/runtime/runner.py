@@ -119,6 +119,20 @@ def write_atomic(path: str, text: str):
     os.replace(tmp, path)
 
 
+def game_mode(userdir: str) -> tuple[str | None, set[str]]:
+    """The mode the player picked in the start-of-game event (JEV|MODE|all/majors/off, or None before the choice) and
+    the major powers (JEV|MAJOR|TAG, logged monthly by the mod), read from game.log."""
+    try:
+        with open(os.path.join(userdir, "logs", "game.log"), encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return None, set()
+    modes = re.findall(r"JEV\|MODE\|(all|majors|off)", text)
+    # majors of the last two months: enough to cover a month still being written; old majors drop out over time
+    majors = set(re.findall(r"JEV\|MAJOR\|([A-Z0-9]{3})", text[-2_000_000:]))
+    return (modes[-1] if modes else None), majors
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="JevAI runner: starts HOI4; the model picks AI postures in your game")
     ap.add_argument("--game", default=None, help="path to hoi4.exe (default: found through Steam)")
@@ -184,10 +198,16 @@ def main(argv=None):
             continue
         if st_center is None:
             st_center = load_invariants(dump)
+        mode, majors = game_mode(a.userdir)
+        if mode in (None, "off"):
+            print(f"[{time.strftime('%H:%M:%S')}] {j['date']}: " + ("waiting for the JevAI choice in the start-of-game event"
+                  if mode is None else "JevAI is off for this game (vanilla AI)"), flush=True)
+            continue
         players = set(t for t in a.player.split(",") if t) or set(j.get("player_countries") or [])
         recs = month_records(j, st_center)
         names = {t: r["name"] for t, r in recs.items()}
-        elig = [t for t, r in recs.items() if t not in players and r["n_states"] > 0 and r["mil"] + r["civ"] >= a.min_factories]
+        elig = [t for t, r in recs.items() if t not in players and r["n_states"] > 0 and r["mil"] + r["civ"] >= a.min_factories
+                and (mode == "all" or t in majors)]
         t0 = time.time()
         chosen = {}
         for t in elig:
@@ -195,7 +215,7 @@ def main(argv=None):
             chosen[t] = int(np.argmax(u)) + 1
         write_atomic(os.path.join(out_dir, ORDERS + ".txt"), orders_file(chosen, j["date"], model.device))
         top = sorted(chosen.items(), key=lambda kv: -(recs[kv[0]]["mil"] + recs[kv[0]]["civ"]))[:6]
-        print(f"[{time.strftime('%H:%M:%S')}] {j['date']}: {len(chosen)} countries in {time.time() - t0:.0f}s on {model.device}; "
+        print(f"[{time.strftime('%H:%M:%S')}] {j['date']} ({mode}): {len(chosen)} countries in {time.time() - t0:.0f}s on {model.device}; "
               + ", ".join(f"{t} {POSTURES[k - 1]}" for t, k in top), flush=True)
 
 

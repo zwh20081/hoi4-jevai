@@ -4,7 +4,7 @@ needed) and the exported model next to it.
     python -m mods.jevai.package --model temp/ov/hoi4-v1 --out temp/release/jevai
 
 Layout of the release (copy the folder into Documents/Paradox Interactive/Hearts of Iron IV/mod/ and add jevai.mod):
-    jevai/descriptor.mod, common/, history/units/JEVAI_orders.txt   the HOI4 mod
+    jevai/descriptor.mod, common/, events/, localisation/, history/  the HOI4 mod
     jevai/runner/jevai.exe (+ _internal/)                           the runner
     jevai/runner/model/                                             jev_npu.xml/.bin, jev_cpu.xml/.bin, tokenizer.json, jev.json
     jevai.mod                                                       descriptor for the launcher (path = mod/jevai)
@@ -29,7 +29,7 @@ def main(argv=None):
     out = os.path.abspath(a.out)
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(out)
-    for part in ("descriptor.mod", "common", "history"):
+    for part in ("descriptor.mod", "common", "events", "history", "localisation"):
         src = os.path.join(HERE, part)
         (shutil.copytree if os.path.isdir(src) else shutil.copy2)(src, os.path.join(out, part))
     work = os.path.join(ROOT, "temp", "release", "build")

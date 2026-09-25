@@ -2,6 +2,18 @@ on_actions = {
 	on_startup = {
 		effect = {
 			log = "JEV|START|[GetDateText]"
+			# the runner reads the chosen mode from game.log (the event logs it when answered; re-logged on each load)
+			if = { limit = { has_global_flag = jevai_mode_all } log = "JEV|MODE|all" }
+			if = { limit = { has_global_flag = jevai_mode_majors } log = "JEV|MODE|majors" }
+			if = { limit = { has_global_flag = jevai_mode_off } log = "JEV|MODE|off" }
+			# ask each human player once which AI countries JevAI should steer (events/jevai.txt)
+			if = {
+				limit = { NOT = { has_global_flag = jevai_mode_majors has_global_flag = jevai_mode_all has_global_flag = jevai_mode_off } }
+				every_country = {
+					limit = { is_ai = no }
+					country_event = { id = jevai.1 days = 1 }
+				}
+			}
 		}
 	}
 	# The runner (jevai.exe) rewrites history/units/JEVAI_orders.txt with each AI country's wanted posture (jev_want).
@@ -30,6 +42,7 @@ on_actions = {
 			if = {
 				limit = { num_of_controlled_states > 0 }
 				log = "JEV|T|[ROOT.GetTag]|ideo=[ROOT.GetRulingIdeology]|fac=[ROOT.GetFactionName]|stab=[?ROOT.stability|2]|ws=[?ROOT.has_war_support|2]|str=[?ROOT.enemies_strength_ratio|2]|astr=[?ROOT.alliance_strength_ratio|2]|surr=[?ROOT.surrender_progress|2]|pp=[?ROOT.political_power|0]|mp=[?ROOT.manpower_k|0]|cas=[?ROOT.casualties_k|0]|subj=[?ROOT.num_subjects|0]|pos=[?ROOT.jev_posture|0]"
+				if = { limit = { is_major = yes } log = "JEV|MAJOR|[ROOT.GetTag]" }
 				log = "JEV|P|[ROOT.GetTag]|inf=[?ROOT.total_equipment_produced_infantry|0]|art=[?ROOT.total_equipment_produced_artillery|0]|at=[?ROOT.total_equipment_produced_anti_tank|0]|aa=[?ROOT.total_equipment_produced_anti_air|0]|arm=[?ROOT.total_equipment_produced_armor|0]|mot=[?ROOT.total_equipment_produced_motorized|0]|fig=[?ROOT.total_equipment_produced_fighter|0]|cas=[?ROOT.total_equipment_produced_cas|0]|tac=[?ROOT.total_equipment_produced_tactical_bomber|0]|nav=[?ROOT.total_equipment_produced_naval_bomber|0]|scr=[?ROOT.total_equipment_produced_screen_ship|0]|cap=[?ROOT.total_equipment_produced_capital_ship|0]|sub=[?ROOT.total_equipment_produced_submarine|0]|bld=[?ROOT.total_constructed_civilian_factory|0]/[?ROOT.total_constructed_military_factory|0]/[?ROOT.total_constructed_dockyard|0]"
 			}
 		}

@@ -195,7 +195,7 @@ jev_set_posture_0 = {
 	log = "JEV|ACT|[ROOT.GetTag]|posture=0"
 }
 jev_follow_orders = {
-	if = { limit = { is_ai = yes NOT = { check_variable = { jev_want = jev_posture } } }
+	if = { limit = { is_ai = yes NOT = { check_variable = { jev_want = jev_posture } } OR = { has_global_flag = jevai_mode_all AND = { has_global_flag = jevai_mode_majors is_major = yes } } }
 		if = { limit = { check_variable = { jev_want = 0 } } jev_set_posture_0 = yes }
 		if = { limit = { check_variable = { jev_want = 1 } } jev_set_posture_1 = yes }
 		if = { limit = { check_variable = { jev_want = 2 } } jev_set_posture_2 = yes }

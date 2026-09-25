@@ -1,0 +1,6 @@
+﻿l_spanish:
+ jevai.1.t: "JevAI: ¿a quién debe dirigir el modelo?"
+ jevai.1.d: "JevAI sustituye parte de la estrategia de la IA por un modelo entrenado. Cada pocos meses elige una postura estratégica (refuerzo defensivo, expansión industrial, ofensiva acorazada, poder aéreo, poder naval o economía de guerra total) para los países de la IA que dirige. Tu propio país nunca se ve afectado.\n\nEl modelo funciona en jevai.exe junto al juego; mientras no esté en marcha, los países mantienen su última postura."
+ jevai.1.a: "Solo las grandes potencias"
+ jevai.1.b: "Todos los países de la IA"
+ jevai.1.c: "Ninguno (IA estándar)"

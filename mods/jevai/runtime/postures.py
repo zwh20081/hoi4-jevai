@@ -97,8 +97,10 @@ def effects() -> str:
                    f"\t\tset_variable = {{ jev_posture = {k} }}\n\t}}\n"
                    f"\tlog = \"JEV|ACT|[ROOT.GetTag]|posture={k}\"\n}}\n")
     out.append("jev_set_posture_0 = {\n\tjev_clear_posture = yes\n\tlog = \"JEV|ACT|[ROOT.GetTag]|posture=0\"\n}\n")
-    # the runner's orders (runner.py): each AI country's wanted posture in jev_want; applied once when it changes
-    out.append("jev_follow_orders = {\n\tif = { limit = { is_ai = yes NOT = { check_variable = { jev_want = jev_posture } } }\n")
+    # the runner's orders (runner.py): each AI country's wanted posture in jev_want; applied once when it changes, and
+    # only in the mode the player chose at game start (events/jevai.txt): all AI countries, or major powers only
+    out.append("jev_follow_orders = {\n\tif = { limit = { is_ai = yes NOT = { check_variable = { jev_want = jev_posture } } "
+               "OR = { has_global_flag = jevai_mode_all AND = { has_global_flag = jevai_mode_majors is_major = yes } } }\n")
     for k in range(0, len(NAMES) + 1):
         out.append(f"\t\tif = {{ limit = {{ check_variable = {{ jev_want = {k} }} }} jev_set_posture_{k} = yes }}\n")
     out.append("\t}\n}\n")

@@ -59,6 +59,16 @@ def device_rng(device: str):
     return mod if device != "cpu" and hasattr(mod, "get_rng_state") else None
 
 
+def trim_cache(device: str, step: int, every: int):
+    """Give the device's cached blocks back every `every` steps. Batch shapes change every step, so the caching
+    allocator keeps adding blocks of new sizes; on an iGPU that cache is host RAM (measured: 36 GB reserved for 4 GB
+    in use after 40 steps, 4.7 GB with a trim every 10 steps at ~4% of the speed). Trimming on every step, or
+    whenever the cache passes a size, stalls the device: 1.7x slower."""
+    mod = device_rng(device)
+    if every and step % every == 0 and mod and hasattr(mod, "empty_cache"):
+        mod.empty_cache()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Fine-tune a Jev bundle on HOI4 examples (resumable)")
     ap.add_argument("--out", required=True)
@@ -81,12 +91,14 @@ def main(argv=None):
     ap.add_argument("--save-every", type=int, default=500)
     ap.add_argument("--max-states", type=int, default=0, help="train on a random subset of states (0 = all)")
     ap.add_argument("--upsample", type=int, default=3)
+    ap.add_argument("--trim-every", type=int, default=10, help="empty the device memory cache every N steps (0 = never)")
     a = ap.parse_args(argv)
+    print(f"loading model and data for {a.out} (a few minutes) ...", flush=True)
     state_path = os.path.join(a.out, "state.pt")
     saved = torch.load(state_path, map_location="cpu", weights_only=False) if a.resume else None
     if saved:
-        a = argparse.Namespace(**dict(saved["args"], resume=True, stop_after=a.stop_after))
-    run_args = {k: v for k, v in vars(a).items() if k not in ("resume", "stop_after")}
+        a = argparse.Namespace(**dict(saved["args"], resume=True, stop_after=a.stop_after, trim_every=a.trim_every))
+    run_args = {k: v for k, v in vars(a).items() if k not in ("resume", "stop_after", "trim_every")}
     if os.name == "nt":  # a long run must not stall on system sleep (the display may still turn off)
         ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
 
@@ -177,9 +189,11 @@ def main(argv=None):
             prog["step"] += 1
             done += 1
             step = prog["step"]
+            trim_cache(a.device, step, a.trim_every)
             if step % 20 == 0 or done == 1:
-                say(f"step {step}/{steps} loss {prog['loss']:.4f} ce {info['ce']:.3f} lr {sched.get_last_lr()[0]:.2e} "
-                    f"{(time.time() - t0) / done:.2f}s/step")
+                sps = (time.time() - t0) / done
+                say(f"step {step}/{steps} ({100 * step / steps:.1f}%) loss {prog['loss']:.4f} ce {info['ce']:.3f} "
+                    f"lr {sched.get_last_lr()[0]:.2e} {sps:.2f}s/step ETA {(steps - step) * sps / 3600:.1f}h")
             if step % a.eval_every == 0 or step == steps:
                 recs = jm.predict(net, packer, val, a.bs, a.device, a.bf16, temperature=1.0)
                 s = skill(recs)

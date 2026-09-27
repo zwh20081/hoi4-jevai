@@ -1,6 +1,11 @@
 ﻿l_english:
  jevai.1.t: "JevAI: Who Should the Model Command?"
- jevai.1.d: "JevAI replaces part of the AI's strategy with a trained model. Every month (every week if you choose major powers only) it picks a strategic posture (defensive buildup, industrial expansion, armored offensive, air power, naval power or total war economy) for the AI countries it commands. Your own country is never affected.\n\nThe model runs in jevai.exe next to the game; while it is not running, countries keep their last posture."
+ jevai.1.d: "JevAI replaces part of the AI's strategy with a trained model. It picks a strategic posture (defensive buildup, industrial expansion, armored offensive, air power, naval power or total war economy) for the AI countries it commands, as often as you choose next. Your own country is never affected.\n\nThe model runs in jevai.exe next to the game; while it is not running, countries keep their last posture."
  jevai.1.a: "Major powers only"
  jevai.1.b: "All AI countries"
  jevai.1.c: "None (vanilla AI)"
+ jevai.2.t: "JevAI: How Often Should the Model Decide?"
+ jevai.2.d: "Weekly decisions react fastest to the war but cost the most computing: about 1.5 seconds per country on an Intel NPU and about 10 seconds on a CPU. Monthly matches the games the model learned from. Every 3 months is the lightest, for slower computers."
+ jevai.2.a: "Every week"
+ jevai.2.b: "Every month"
+ jevai.2.c: "Every 3 months"

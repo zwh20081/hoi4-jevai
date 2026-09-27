@@ -1,7 +1,7 @@
 # What the runner (jevai.exe, runtime/runner.py log_records) reads about a country, logged to game.log:
 # T = stability, war support, strength ratios, posture in force; S = the numbers of the state text; G = ideology group
 # key (language independent); H = human-played; MAJOR; N/E/A = one line per neighbour / enemy / ally.
-# Called monthly for every country and, in the "major powers only" mode, weekly for major powers (on_actions/jevai.txt).
+# Called monthly for every country and, with the weekly period, weekly for the countries in range (on_actions/jevai.txt).
 jev_log_state = {
 	log = "JEV|T|[ROOT.GetTag]|ideo=[ROOT.GetRulingIdeology]|fac=[ROOT.GetFactionName]|stab=[?ROOT.stability|2]|ws=[?ROOT.has_war_support|2]|str=[?ROOT.enemies_strength_ratio|2]|astr=[?ROOT.alliance_strength_ratio|2]|surr=[?ROOT.surrender_progress|2]|pp=[?ROOT.political_power|0]|mp=[?ROOT.manpower_k|0]|cas=[?ROOT.casualties_k|0]|subj=[?ROOT.num_subjects|0]|pos=[?ROOT.jev_posture|0]"
 	log = "JEV|S|[ROOT.GetTag]|name=[ROOT.GetName]|mil=[?ROOT.num_of_military_factories|0]|civ=[?ROOT.num_of_civilian_factories|0]|nav=[?ROOT.num_of_naval_factories|0]|st=[?ROOT.num_of_controlled_states|0]|div=[?ROOT.num_divisions|0]|mpmax=[?ROOT.max_manpower_k|0]"

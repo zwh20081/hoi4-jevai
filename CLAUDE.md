@@ -46,24 +46,41 @@ python -m mods.jevai.workshop temp/release/jevai --note "..."  # create/update t
 
 Players start the runner manually with `jevai.exe` before each game, or run `jevai.exe --install` once (the release's
 `install.cmd`): it copies the runner without the model to `%LOCALAPPDATA%\jevai\runner`, adds a Startup-folder shortcut
-that runs the copy with `--hidden --mod <mod folder>` at logon, and starts it; `--uninstall` removes the shortcut, the
-copy and the NPU cache. Running from the copy keeps the mod folder unlocked, so Steam can update the Workshop item;
+that runs the copy with `--hidden --mod <mod folder>` at logon, prepares the model and starts it; `--uninstall` removes
+the shortcut, the copy and the NPU cache. `runner.prepare` compiles the model into `%LOCALAPPDATA%\jevai\ov_cache` in a
+child `jevai.exe --compile DEVICE` (a compile in the runner's own process could not be stopped): the NPU first, each
+device stopped after `runner.LIMIT` (NPU 10 min, CPU 5; the NPU takes ~2.5 min on a Core Ultra 300); an NPU failure
+or time-out is recorded in `ov_cache\npu_skip.json` (keyed by model files and OpenVINO version; `--device NPU`, a
+reinstall or a new model retries) and later runs use the CPU. It runs at install (progress in the install window), when
+the runner starts and when a game starts; from a warm cache that takes seconds, so `runner.Model` loads before HOI4 has
+finished loading. Running from the copy keeps the mod folder unlocked, so Steam can update the Workshop item;
 when HOI4 starts and the mod's `jevai.exe` differs from the copy (size, mtime), the copy runs the mod's
 `jevai.exe --install` and exits (`runner.updated_runner`). The runner (one per user, named mutex) waits for
-`hoi4.exe`, loads the model when it appears (NPU compile ~2 min the first time, then from cache in ~0 s), steers that
-game until the process exits, frees the model and waits again (`runner.session`). No launch option, dump or console
-input: `scripted_effects/jevai_state.txt` (`jev_log_state`) logs a country's
+`hoi4.exe`, then works with the JevAI copy the playset enables (`runner.game_mod`: the `.mod` named JevAI in
+`dlc_load.json`, for the orders, the model and the self-update; it warns when none is enabled or two `.mod` files carry
+the name), prepares and loads the model (naming the device; if the NPU fails in-process anyway, the CPU), steers that
+game until the process exits, frees the model
+and waits again (`runner.session`; an exception is logged and the runner sits out that game). The user folder is
+`<Documents>\Paradox Interactive\Hearts of Iron IV` with Documents from `SHGetKnownFolderPath` (OneDrive can move it;
+`--userdir` overrides). `runner.silence` says once why a game logs nothing for JevAI: no `game.log` after a minute,
+JevAI missing from `system.log`'s Active Mod lines, or two game days without a `JEV|` line (an overhaul replaced its
+scripts). No launch option, dump or console input: `scripted_effects/jevai_state.txt` (`jev_log_state`) logs a country's
 state to `game.log` (`JEV|S` numbers, `T` stability/war support/ratios/posture, `G` ideology group key, `H`
-human-played, `MAJOR`, `N`/`E`/`A` one line per neighbour/enemy/ally), monthly for every country and, in the "major
-powers only" mode, weekly for major powers. `runner.GameLog` groups lines into bursts by game date and keeps each
+human-played, `MAJOR`, `N`/`E`/`A` one line per neighbour/enemy/ally), monthly for every country and, with the weekly
+period, weekly for the countries in range. `runner.GameLog` groups lines into bursts by game date and keeps each
 country's latest lines, and `runner.log_records` rebuilds the training-format state text. Country names come from the
 game's and active mods' English localisation (`TAG_<group>`, then `TAG`) and ideologies from the group key, so the text
 stays English in any game language (modded ideology groups keep their localized name). Units at the front, fleets
 and equipment requests are not available to scripts: the text shows 0 / omits them (a known difference from the
 dump-built training text; everything else matched on 91/91 countries of a real month, `temp/checks/check_logpath.py`).
-Each completed burst is decided for the countries in it (every AI country monthly, or the majors weekly, per the
-start-of-game event in `events/jevai.txt`), keeping the current posture unless another scores `--stick` (0.01) higher,
-and written to `<mod>/history/units/JEVAI_orders.txt` (emptied when a new HOI4 process starts); the mod's `on_daily`
+Two start-of-game events (`events/jevai.txt`) set the range (`jevai.1`: major powers, all AI countries with
+`--min-factories` 20+, or none; `JEV|MODE|majors|all|off`) and the period (`jevai.2`: `JEV|PERIOD|week|month|quarter`);
+`on_startup` logs both again on each load and gives saves from 0.2, which have no period, their old pace (majors
+weekly, all AI monthly). The newest completed burst is decided for the countries in range once `runner.due` allows it
+(at least 7/28/89 game days since the last decision; at once after loading an earlier save), keeping the current
+posture unless another scores `--stick` (0.01) higher; on a CPU a batch longer than ~20 s is announced first, and
+updates that arrived meanwhile are reported as skipped. The orders go to `history/units/JEVAI_orders.txt` of that
+JevAI copy (emptied when a new HOI4 process starts); the mod's `on_daily`
 reloads it with `load_oob` (once per day, whatever the tags) and `jev_follow_orders` applies the posture to AI
 countries only. The runner logs to `%LOCALAPPDATA%\jevai\jevai.log`. Unverified in-game so far: that `load_oob` re-reads the file from disk on every call (`JEV|ACT`
 lines in game.log show postures being applied).
@@ -71,8 +88,12 @@ lines in game.log show postures being applied).
 Load order: overhaul mods `replace_path` `common/on_actions`, `events`, `common/scripted_effects` and `history/units`,
 which drops those folders from every mod loaded before them, and mods load alphabetically unless a dependency says
 otherwise. The shipped `descriptor.mod` has no hard dependencies. `runner.patch_load_order` adds only enabled mods
-that use `replace_path` to the mod's own `descriptor.mod` and the launcher's `.mod` file for it (`jevai.mod`, or
-`ugc_<id>.mod` for the Workshop item) at each start, effective at the next launch.
+that use `replace_path` to the `descriptor.mod` of every JevAI copy (`--mod` and each folder a `.mod` named JevAI
+points to) and to those launcher `.mod` files (`jevai.mod`, or `ugc_<id>.mod` for the Workshop item) at each start,
+effective at the next launch. The launcher rewrites every `ugc_<id>.mod` from the Workshop folder's `descriptor.mod`
+when it starts, so for the Workshop item only the latter counts. Two `.mod` files with the same `name`: HOI4 dropped
+the enabled Workshop copy while a local `jevai.mod` named JevAI existed (no Active Mod line, no events), and loaded it
+alone, next to a renamed local copy, or from a plain `.mod` (`temp/checks/modtest.py`, 2026-09-27).
 
 Releases: code on GitHub `zwh20081/hoi4-jevai`, models on Hugging Face `zwh20081/hoi4-jevai` (`torch/`, `openvino/`),
 the mod on the Steam Workshop (item 3808093078). `mods.jevai.workshop` uploads `temp/release/jevai` through the running
@@ -84,7 +105,8 @@ text `workshop.txt`.
   questions): `jev_npu.xml` uses `trainer/npu_attention.py` (relative-position gathers as one-hot matmuls, mask as an
   additive bias, the attention scale as a Python constant; the traced TorchScript scale made the NPU wrong) and runs
   ~7x faster on the Intel NPU; `jev_cpu.xml` keeps the stock attention, which is faster on CPU. The runner uses the
-  NPU if present, else CPU, and caches the NPU compile (~75 s) in `%LOCALAPPDATA%\jevai\ov_cache`.
+  NPU if present and its compile (75-160 s here) succeeds within the limit, else the CPU (compile ~5 s, ~9 s per
+  country); both compiles are cached in `%LOCALAPPDATA%\jevai\ov_cache` (`runner.prepare`).
 - The `ov` conda env (CPU torch, openvino, nncf, pyinstaller) is separate from `py313` so exports never disturb
   training. Training itself runs fastest on a CUDA box: `trainer/train.sh <name>` starts or resumes it in tmux.
 

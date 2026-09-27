@@ -2,10 +2,23 @@ on_actions = {
 	on_startup = {
 		effect = {
 			log = "JEV|START|[GetDateText]"
-			# the runner reads the chosen mode from game.log (the event logs it when answered; re-logged on each load)
+			# saves from before the period choice (JevAI 0.2) keep their pace: major powers weekly, all AI countries monthly
+			if = {
+				limit = {
+					NOT = { has_global_flag = jevai_period_week }
+					NOT = { has_global_flag = jevai_period_month }
+					NOT = { has_global_flag = jevai_period_quarter }
+				}
+				if = { limit = { has_global_flag = jevai_mode_majors } set_global_flag = jevai_period_week }
+				if = { limit = { has_global_flag = jevai_mode_all } set_global_flag = jevai_period_month }
+			}
+			# the runner reads the chosen range and period from game.log (the events log them when answered; re-logged on each load)
 			if = { limit = { has_global_flag = jevai_mode_all } log = "JEV|MODE|all" }
 			if = { limit = { has_global_flag = jevai_mode_majors } log = "JEV|MODE|majors" }
 			if = { limit = { has_global_flag = jevai_mode_off } log = "JEV|MODE|off" }
+			if = { limit = { has_global_flag = jevai_period_week } log = "JEV|PERIOD|week" }
+			if = { limit = { has_global_flag = jevai_period_month } log = "JEV|PERIOD|month" }
+			if = { limit = { has_global_flag = jevai_period_quarter } log = "JEV|PERIOD|quarter" }
 			# ask each human player once which AI countries JevAI should steer (events/jevai.txt)
 			if = {
 				limit = { NOT = { has_global_flag = jevai_mode_majors has_global_flag = jevai_mode_all has_global_flag = jevai_mode_off } }
@@ -34,12 +47,20 @@ on_actions = {
 			}
 		}
 	}
-	# The runner's view of each country (scripted_effects/jevai_state.txt): monthly for every country and, in the
-	# "major powers only" mode, weekly for major powers, which the runner then re-decides every week.
+	# The runner's view of each country (scripted_effects/jevai_state.txt): monthly for every country and, with the
+	# weekly period, weekly for the countries in range (major powers, or all), which the runner then re-decides every
+	# week. The monthly and 3-monthly periods use the monthly lines.
 	on_weekly = {
 		effect = {
 			if = {
-				limit = { has_global_flag = jevai_mode_majors is_major = yes num_of_controlled_states > 0 }
+				limit = {
+					has_global_flag = jevai_period_week
+					num_of_controlled_states > 0
+					OR = {
+						has_global_flag = jevai_mode_all
+						AND = { has_global_flag = jevai_mode_majors is_major = yes }
+					}
+				}
 				jev_log_state = yes
 			}
 		}

@@ -1,8 +1,10 @@
 add_namespace = jevai
 
-# Asked once, at the start of a game (or the first time a save is loaded with JevAI): which AI countries JevAI steers.
-# The choice is kept in the global flag jevai_mode_all (all AI countries) or jevai_mode_majors (major powers only);
-# jev_follow_orders reads it. Nothing is changed before the player answers.
+# Asked once, at the start of a game (or the first time a save is loaded with JevAI): which AI countries JevAI steers
+# (jevai.1), then how often the model decides for them (jevai.2). The range is kept in the global flag jevai_mode_all
+# (all AI countries), jevai_mode_majors (major powers only) or jevai_mode_off, the period in jevai_period_week,
+# jevai_period_month or jevai_period_quarter. jev_follow_orders reads the range; the runner reads both from game.log
+# (JEV|MODE, JEV|PERIOD; on_startup logs them again on each load). Nothing is changed before the player answers.
 country_event = {
 	id = jevai.1
 	title = jevai.1.t
@@ -15,18 +17,55 @@ country_event = {
 		name = jevai.1.a
 		set_global_flag = jevai_mode_majors
 		log = "JEV|MODE|majors"
+		country_event = jevai.2
 		ai_chance = { base = 1 }
 	}
 	option = {
 		name = jevai.1.b
 		set_global_flag = jevai_mode_all
 		log = "JEV|MODE|all"
+		country_event = jevai.2
 		ai_chance = { base = 0 }
 	}
 	option = {
 		name = jevai.1.c
 		set_global_flag = jevai_mode_off
 		log = "JEV|MODE|off"
+		ai_chance = { base = 0 }
+	}
+}
+
+# The period: each option replaces a period set before (a save from JevAI 0.2 gets its old pace on load, on_startup).
+country_event = {
+	id = jevai.2
+	title = jevai.2.t
+	desc = jevai.2.d
+	picture = GFX_report_event_military_planning
+	is_triggered_only = yes
+	fire_only_once = yes
+
+	option = {
+		name = jevai.2.a
+		clr_global_flag = jevai_period_month
+		clr_global_flag = jevai_period_quarter
+		set_global_flag = jevai_period_week
+		log = "JEV|PERIOD|week"
+		ai_chance = { base = 0 }
+	}
+	option = {
+		name = jevai.2.b
+		clr_global_flag = jevai_period_week
+		clr_global_flag = jevai_period_quarter
+		set_global_flag = jevai_period_month
+		log = "JEV|PERIOD|month"
+		ai_chance = { base = 1 }
+	}
+	option = {
+		name = jevai.2.c
+		clr_global_flag = jevai_period_week
+		clr_global_flag = jevai_period_month
+		set_global_flag = jevai_period_quarter
+		log = "JEV|PERIOD|quarter"
 		ai_chance = { base = 0 }
 	}
 }

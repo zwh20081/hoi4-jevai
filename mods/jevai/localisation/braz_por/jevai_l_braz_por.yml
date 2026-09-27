@@ -1,6 +1,11 @@
 ﻿l_braz_por:
  jevai.1.t: "JevAI: quem o modelo deve comandar?"
- jevai.1.d: "O JevAI substitui parte da estratégia da IA por um modelo treinado. Todo mês (toda semana, se você escolher apenas as grandes potências), ele escolhe uma postura estratégica (reforço defensivo, expansão industrial, ofensiva blindada, poder aéreo, poder naval ou economia de guerra total) para os países da IA que comanda. Seu próprio país nunca é afetado.\n\nO modelo roda no jevai.exe ao lado do jogo; enquanto não estiver rodando, os países mantêm a última postura."
+ jevai.1.d: "O JevAI substitui parte da estratégia da IA por um modelo treinado. Ele escolhe uma postura estratégica (reforço defensivo, expansão industrial, ofensiva blindada, poder aéreo, poder naval ou economia de guerra total) para os países da IA que comanda, com a frequência que você escolher a seguir. Seu próprio país nunca é afetado.\n\nO modelo roda no jevai.exe ao lado do jogo; enquanto não estiver rodando, os países mantêm a última postura."
  jevai.1.a: "Apenas grandes potências"
  jevai.1.b: "Todos os países da IA"
  jevai.1.c: "Nenhum (IA padrão)"
+ jevai.2.t: "JevAI: com que frequência o modelo deve decidir?"
+ jevai.2.d: "Decisões semanais reagem mais rápido à guerra, mas exigem mais processamento: cerca de 1,5 segundo por país em uma NPU Intel e cerca de 10 segundos em uma CPU. A frequência mensal corresponde às partidas com que o modelo aprendeu. A cada 3 meses é a opção mais leve, para computadores mais lentos."
+ jevai.2.a: "Toda semana"
+ jevai.2.b: "Todo mês"
+ jevai.2.c: "A cada 3 meses"

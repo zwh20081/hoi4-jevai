@@ -1,6 +1,11 @@
 ﻿l_polish:
  jevai.1.t: "JevAI: kim ma dowodzić model?"
- jevai.1.d: "JevAI zastępuje część strategii SI wytrenowanym modelem. Co miesiąc (co tydzień, jeśli wybierzesz tylko mocarstwa) wybiera postawę strategiczną (rozbudowa obrony, ekspansja przemysłowa, ofensywa pancerna, lotnictwo, marynarka lub gospodarka wojny totalnej) dla krajów SI, którymi dowodzi. Twój kraj nigdy nie jest objęty.\n\nModel działa w jevai.exe obok gry; gdy nie działa, kraje zachowują ostatnią postawę."
+ jevai.1.d: "JevAI zastępuje część strategii SI wytrenowanym modelem. Wybiera postawę strategiczną (rozbudowa obrony, ekspansja przemysłowa, ofensywa pancerna, lotnictwo, marynarka lub gospodarka wojny totalnej) dla krajów SI, którymi dowodzi, tak często, jak wybierzesz w następnym kroku. Twój kraj nigdy nie jest objęty.\n\nModel działa w jevai.exe obok gry; gdy nie działa, kraje zachowują ostatnią postawę."
  jevai.1.a: "Tylko mocarstwa"
  jevai.1.b: "Wszystkie kraje SI"
  jevai.1.c: "Żadnym (standardowa SI)"
+ jevai.2.t: "JevAI: jak często model ma podejmować decyzje?"
+ jevai.2.d: "Decyzje co tydzień najszybciej reagują na przebieg wojny, ale wymagają najwięcej obliczeń: około 1,5 sekundy na kraj na Intel NPU i około 10 sekund na procesorze. Co miesiąc odpowiada rozgrywkom, na których uczył się model. Co 3 miesiące to najlżejsza opcja dla wolniejszych komputerów."
+ jevai.2.a: "Co tydzień"
+ jevai.2.b: "Co miesiąc"
+ jevai.2.c: "Co 3 miesiące"

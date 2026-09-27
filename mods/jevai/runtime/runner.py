@@ -6,13 +6,17 @@ dump or console input needed; players only use the Paradox launcher. Ships as je
     jevai.exe --uninstall    remove that and stop the background runner
     jevai.exe                run in this window: wait for HOI4, steer it while it runs, repeat
 
-The mod logs each country's state to game.log (scripted_effects/jevai_state.txt: JEV|S/T/G/H/N/E/A lines): every
-country on the 1st of each month and, in the "major powers only" mode, the major powers every week. When HOI4 starts,
-the runner loads the model (NPU if present, else CPU; the first NPU compile takes ~2 min, later loads come from cache),
-rebuilds the model's state text from each update and decides for the countries in it: every AI country monthly, or
-the major powers weekly. It writes the choices to <mod>/history/units/JEVAI_orders.txt; the mod reloads that file
-daily with load_oob and applies each posture through its scripted effects. When the game closes it frees the model and
-waits for the next one. It also keeps JevAI loading after every installed overhaul mod (patch_load_order).
+At the start of a game the player picks the range (major powers or all AI countries) and the period (every week, month
+or 3 months; events/jevai.txt). The mod logs each country's state to game.log (scripted_effects/jevai_state.txt:
+JEV|S/T/G/H/N/E/A lines): every country on the 1st of each month and, with the weekly period, the countries in range
+every week. The model is compiled before any game (prepare: at install, when the runner starts and again when a game
+starts; NPU if present and it compiles within the time limit, else CPU, each in a child process that can be stopped),
+so when HOI4 starts the runner loads it from the cache in seconds. It rebuilds the model's state text from each update
+and, once the period has passed since its last decision, decides for the countries in range. It writes the choices to
+history/units/JEVAI_orders.txt in the JevAI copy the game uses (the one enabled in the launcher's playset); the mod
+reloads that file daily with load_oob and applies each posture through its scripted effects. When the game closes it
+frees the model and waits for the next one. It also keeps JevAI loading after every installed overhaul mod (patch_load_order), finds HOI4's user folder in
+the Windows Documents folder wherever OneDrive or a folder move put it, and says in its log why a game stays silent.
 
 The installed runner is a copy outside the mod folder, so it never locks the mod's files and Steam can update the
 Workshop item; when HOI4 starts and the mod's jevai.exe differs from the copy, the copy reinstalls from it.
@@ -30,6 +34,8 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
+import uuid
 
 import numpy as np
 
@@ -38,16 +44,41 @@ from .postures import NAMES as POSTURES, VERSION
 from .text import GROWTH_LEVELS, posture_questions, state_text
 
 ORDERS = "JEVAI_orders"  # load_oob name: history/units/JEVAI_orders.txt inside the mod
+NAME = "JevAI"  # the mod's name in its descriptor: how the launcher's .mod files for it are found
 IDEOLOGY = {"fascism": "fascist", "communism": "communist", "democratic": "democratic", "neutrality": "non-aligned"}
-LINE = re.compile(r"^\[[^\]]*\]\[(\d+)\.(\d+)\.(\d+)\.\d+\]\[[^\]]*\]: (JEV\|.*?)\s*$")
+LINE = re.compile(r"^\[[^\]]*\]\[(\d+)\.(\d+)\.(\d+)\.\d+\]\[[^\]]*\]: (.*?)\s*$")  # a game.log line with a game date
 KINDS = {"S", "T", "G", "H", "N", "E", "A", "MAJOR"}
+PERIOD_DAYS = {"week": 7, "month": 28, "quarter": 89}  # fewest game days between decisions (months have 28 to 31)
+LIMIT = {"NPU": 600, "CPU": 300}  # seconds a compile may take before JevAI stops it (NPU ~2.5 min on a Core Ultra 300)
+PROGRESS = 60  # seconds between "still compiling" lines
+MONTH_START = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)  # HOI4's calendar has no leap years
+MOD_NAME = re.compile(r'^\s*name\s*=\s*"([^"]+)"', re.M)
 LOC_NAME = re.compile(r'^\s*([A-Z][A-Z0-9]{2}(?:_(?:fascism|communism|democratic|neutrality))?):\d*\s*"(.*)"\s*$')
 NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW for helper processes
 HOME = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "jevai")  # runner copy, NPU cache, log
 
 
 def default_userdir() -> str:
-    return os.path.join(os.path.expanduser("~"), "Documents", "Paradox Interactive", "Hearts of Iron IV")
+    """HOI4's user folder in the Windows Documents folder, found the way the game finds it: OneDrive or a folder move
+    can put Documents elsewhere than %USERPROFILE%\\Documents."""
+    docs, path = os.path.join(os.path.expanduser("~"), "Documents"), ctypes.c_wchar_p()
+    folder = ctypes.create_string_buffer(uuid.UUID("FDD39AD0-238F-46AF-ADB4-6C85480369C7").bytes_le)  # FOLDERID_Documents
+    if ctypes.windll.shell32.SHGetKnownFolderPath(folder, 0, None, ctypes.byref(path)) == 0:
+        docs = path.value
+    ctypes.windll.ole32.CoTaskMemFree(path)
+    return os.path.join(docs, "Paradox Interactive", "Hearts of Iron IV")
+
+
+def game_day(date: str) -> int:
+    """A game date "y.m.d" as a day count."""
+    y, m, d = map(int, date.split("."))
+    return 365 * y + MONTH_START[m - 1] + d
+
+
+def due(period: str, last: int | None, day: int) -> bool:
+    """Whether the update of `day` gets a decision: the first one, one after loading an earlier save, and then each one
+    once the period has passed since the last decision."""
+    return last is None or day < last or day - last >= PERIOD_DAYS.get(period, PERIOD_DAYS["month"])
 
 
 def find_game() -> str | None:
@@ -77,9 +108,11 @@ STARTUP_LINK = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows
                             "JevAI.lnk")
 
 
-def install(mod: str):
+def install(mod: str, model: str | None = None):
     """Copy the runner (not the model) to HOME/runner, add a Startup-folder shortcut that runs the copy hidden for this
-    mod folder at every logon, and start it now."""
+    mod folder at every logon, compile the model into the cache (prepare, with progress; a reinstall tries the NPU
+    again), and start the runner."""
+    print(f"\n=== JevAI install {time.strftime('%Y-%m-%d %H:%M:%S')} from {mod}", flush=True)
     stop_others()
     src, dst = here(), os.path.join(HOME, "runner")
     if os.path.normcase(src) != os.path.normcase(dst):
@@ -91,8 +124,14 @@ def install(mod: str):
                     f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{q(STARTUP_LINK)}');$s.TargetPath='{q(exe)}';"
                     f"$s.Arguments='--hidden --mod \"{q(mod)}\"';$s.WorkingDirectory='{q(dst)}';$s.WindowStyle=7;$s.Save()"],
                    check=True, capture_output=True, creationflags=NO_WINDOW)
+    if os.path.exists(_npu_skip_path()):
+        os.remove(_npu_skip_path())
+    print("preparing the model: about 2 minutes on an Intel NPU the first time, seconds on a CPU", flush=True)
+    device = prepare(model or os.path.join(mod, "runner", "model"))
     os.startfile(STARTUP_LINK)
-    print(f"JevAI is installed in {dst}, starts with Windows and is running now. Just play from the Paradox launcher.")
+    print(f"JevAI is installed in {dst}, starts with Windows and is running now"
+          + (f", with the model on the {device}" if device else "; the model did not load (see above)")
+          + ". Just play from the Paradox launcher.", flush=True)
 
 
 def uninstall():
@@ -146,35 +185,39 @@ def _mod_root(userdir: str, descriptor_text: str) -> str | None:
     return None if not p else p.group(1) if os.path.isabs(p.group(1)) else os.path.join(userdir, p.group(1))
 
 
+def enabled_mods(userdir: str) -> list[str]:
+    """The launcher's .mod files enabled in dlc_load.json (the playset the game starts with), in its order."""
+    try:
+        files = json.loads(_read(os.path.join(userdir, "dlc_load.json"))).get("enabled_mods", [])
+    except ValueError:
+        return []
+    return [os.path.normcase(os.path.normpath(os.path.join(userdir, f))) for f in files]
+
+
 def patch_load_order(userdir: str, mod: str) -> list[str]:
     """Overhaul mods list folders under replace_path, which drops those folders (on_actions, events, scripted effects,
     history/units) from every mod loaded before them, and mods load alphabetically unless a dependency says otherwise.
-    Declare only enabled replace_path mods as dependencies so JevAI loads after them. Write the mod's descriptor.mod
-    and the launcher's .mod file (jevai.mod, or ugc_<id>.mod for the Workshop item). The launcher and the game read
-    the change at their next start."""
-    moddir = os.path.join(userdir, "mod")
+    Declare only enabled replace_path mods as dependencies so JevAI loads after them. Write the descriptor.mod of every
+    JevAI copy (--mod, and each one a launcher .mod file named JevAI points to) and those .mod files (jevai.mod, or
+    ugc_<id>.mod for the Workshop item). The launcher and the game read the change at their next start."""
     names, ours = set(), [os.path.join(mod, "descriptor.mod")]
-    try:
-        enabled = json.loads(_read(os.path.join(userdir, "dlc_load.json"))).get("enabled_mods", [])
-    except ValueError:
-        enabled = []
-    enabled = {os.path.normcase(os.path.normpath(os.path.join(userdir, f))) for f in enabled}
-    for f in glob.glob(os.path.join(moddir, "*.mod")):
+    enabled = set(enabled_mods(userdir))
+    for f in glob.glob(os.path.join(userdir, "mod", "*.mod")):
         text = _read(f)
-        name = re.search(r'^\s*name\s*=\s*"([^"]+)"', text, re.M)
+        name = MOD_NAME.search(text)
         if not name:
             continue
-        if name.group(1) == "JevAI":
-            ours.append(f)
+        root = _mod_root(userdir, text)
+        if name.group(1) == NAME:
+            ours += [f] + ([os.path.join(root, "descriptor.mod")] if root else [])
             continue
         if os.path.normcase(os.path.normpath(f)) not in enabled:
             continue
-        root = _mod_root(userdir, text)
         if "replace_path" in text or (root and "replace_path" in _read(os.path.join(root, "descriptor.mod"))):
             names.add(name.group(1))
     block_re = re.compile(r"\n?dependencies\s*=\s*\{([^}]*)\}\s*")
     block = ("dependencies = {\n" + "".join(f'\t"{n}"\n' for n in sorted(names)) + "}\n") if names else ""
-    for f in ours:
+    for f in {os.path.normcase(os.path.abspath(p)): p for p in ours}.values():
         text = _read(f)
         if not text:
             continue
@@ -187,11 +230,61 @@ def patch_load_order(userdir: str, mod: str) -> list[str]:
 
 def active_mods(userdir: str) -> list[str]:
     """Folders of the mods enabled in the launcher (dlc_load.json)."""
-    try:
-        enabled = json.loads(_read(os.path.join(userdir, "dlc_load.json"))).get("enabled_mods", [])
-    except ValueError:
-        return []
-    return [r for r in (_mod_root(userdir, _read(os.path.join(userdir, m))) for m in enabled) if r]
+    return [r for r in (_mod_root(userdir, _read(f)) for f in enabled_mods(userdir)) if r]
+
+
+def jevai_mods(userdir: str) -> list[tuple[str, str | None, bool]]:
+    """The launcher's .mod files named JevAI (a Workshop subscription, a local copy): file, mod folder, enabled."""
+    enabled, out = set(enabled_mods(userdir)), []
+    for f in sorted(glob.glob(os.path.join(userdir, "mod", "*.mod"))):
+        text = _read(f)
+        name = MOD_NAME.search(text)
+        if name and name.group(1) == NAME:
+            out.append((f, _mod_root(userdir, text), os.path.normcase(os.path.normpath(f)) in enabled))
+    return out
+
+
+def game_mod(a) -> str:
+    """The JevAI folder the game uses (the enabled .mod named JevAI), else --mod. Says when JevAI is not in the
+    playset, or when several .mod files carry its name: HOI4 then skipped the enabled Workshop copy in a test while a
+    local jevai.mod of the same name existed (temp/checks/modtest.py)."""
+    mods = jevai_mods(a.userdir)
+    if len(mods) > 1:
+        print(f"{len(mods)} mods are named {NAME} ({', '.join(os.path.basename(f) for f, _, _ in mods)}): HOI4 can skip "
+              f"the enabled one; keep one, or rename the others in their .mod and descriptor.mod files", flush=True)
+    for _, root, on in mods:
+        if on and root and os.path.isdir(os.path.join(root, "history", "units")):
+            return root
+    print(f"{NAME} is not enabled in the launcher's playset; enable it there and start the game again", flush=True)
+    return a.mod
+
+
+def active_mod_names(userdir: str) -> list[str] | None:
+    """The mods HOI4 runs this session, from system.log's Active Mod lines; None until it has logged them."""
+    text = _read(os.path.join(userdir, "logs", "system.log"))
+    return re.findall(r"\]: Active Mod: (.*?)\s*$", text, re.M) if "Active Mod Count:" in text else None
+
+
+def silence(userdir: str, log: GameLog, waited: float) -> str | None:
+    """Why the game logs no JevAI lines, once that is clear: no game.log a minute after HOI4 started, HOI4 not running
+    JevAI (system.log lists the active mods before the game loads), or JevAI active while the game ran two days without
+    a JEV line (an overhaul mod loaded after it and its replace_path dropped JevAI's scripts)."""
+    if not os.path.isfile(log.path):
+        return (f"no game log at {log.path} a minute after HOI4 started: its user folder is elsewhere; start jevai.exe "
+                f'with --userdir "<that folder>"') if waited > 60 else None
+    if log.jev or not log.days:
+        return None
+    active = active_mod_names(userdir)
+    if active is not None and NAME not in active:
+        return (f"HOI4 did not load {NAME} in this game (its system.log lists {len(active)} active mods, not {NAME}): "
+                f"enable {NAME} in the launcher's playset, keep only one mod named {NAME}, and start the game again")
+    if len(log.days) < 3:
+        return None
+    if active is not None:
+        return (f"{NAME} is loaded, but its scripts do not run: an overhaul mod replaces them and loads after it. {NAME} "
+                "now loads after the overhaul mods it found; restart the Paradox launcher, then the game")
+    return (f"the game has run 2 days without a {NAME} line: HOI4 did not load {NAME} (check the launcher's playset), or "
+            "an overhaul mod loaded after it and replaced its scripts (restart the Paradox launcher)")
 
 
 def english_names(roots: list[str]) -> dict[str, str]:
@@ -209,13 +302,19 @@ def english_names(roots: list[str]) -> dict[str, str]:
 
 class GameLog:
     """The mod's JEV lines, read from <userdir>/logs/game.log as the game writes them. Lines come in bursts (every
-    country on the 1st of each month; major powers weekly in the "major powers only" mode), grouped here by game date.
+    country on the 1st of each month; the countries in range weekly with the weekly period), grouped here by game date.
     `latest` keeps each country's most recent lines, so a weekly burst of major powers still sees last month's
-    neighbours. The game recreates the file when it starts, so a file shorter than what was read means a new session."""
+    neighbours. The game recreates the file when it starts, so a file shorter than what was read means a new session.
+    `mode` and `period` are the player's choices (JEV|MODE, JEV|PERIOD); `days` (up to 3 game dates seen) and `jev` (a
+    JEV line seen) tell a running game that logs nothing for JevAI."""
 
     def __init__(self, userdir: str):
         self.path = os.path.join(userdir, "logs", "game.log")
-        self.pos, self.mode, self.bursts, self.latest, self.last = 0, None, {}, {}, 0.0
+        self.last = 0.0
+        self.reset()
+
+    def reset(self):
+        self.pos, self.mode, self.period, self.bursts, self.latest, self.days, self.jev = 0, None, None, {}, {}, set(), False
 
     def poll(self):
         try:
@@ -223,7 +322,7 @@ class GameLog:
         except OSError:
             return
         if size < self.pos:
-            self.pos, self.mode, self.bursts, self.latest = 0, None, {}, {}
+            self.reset()
         if size == self.pos:
             return
         with open(self.path, "rb") as f:
@@ -235,11 +334,21 @@ class GameLog:
             m = LINE.match(line)
             if not m:
                 continue
+            date = tuple(map(int, m.groups()[:3]))
+            if len(self.days) < 3:
+                self.days.add(date)
+            if not m.group(4).startswith("JEV|"):
+                continue
+            self.jev = True
             p = m.group(4).split("|")
-            if p[1] == "MODE" and len(p) > 2:
+            if len(p) < 3:
+                continue
+            if p[1] == "MODE":
                 self.mode = p[2]
-            elif p[1] in KINDS and len(p) > 2:
-                self.bursts.setdefault(tuple(map(int, m.groups()[:3])), []).append(p)
+            elif p[1] == "PERIOD":
+                self.period = p[2]
+            elif p[1] in KINDS:
+                self.bursts.setdefault(date, []).append(p)
                 self.last = time.time()
 
     def complete(self, quiet: float = 5.0) -> list[tuple[str, set[str]]]:
@@ -298,7 +407,9 @@ def log_records(lines: list[list[str]], english: dict[str, str], date: str) -> t
         elif kind == "MAJOR":
             majors.add(tag)
         elif kind in ("N", "E", "A") and len(p) > 3:
-            rec(tag)[{"N": "neighbors", "E": "enemies", "A": "allies"}[kind]].append(p[3])
+            tags = rec(tag)[{"N": "neighbors", "E": "enemies", "A": "allies"}[kind]]
+            if p[3] not in tags:  # a day with both the weekly and the monthly update logs a country twice
+                tags.append(p[3])
     for tag, r in recs.items():
         g = group.get(tag)
         if g in IDEOLOGY:
@@ -310,25 +421,155 @@ def log_records(lines: list[list[str]], english: dict[str, str], date: str) -> t
     return {t: r for t, r in recs.items() if r["n_states"] > 0}, names, humans, majors
 
 
+def compile_graph(core, model_dir: str, device: str) -> tuple[dict, str, object]:
+    """The model's config, its graph for `device` and an infer request, compiled through HOME/ov_cache with the settings
+    every caller uses: the child's compile (prepare) and the runner's load (Model) share one cache entry."""
+    with open(os.path.join(model_dir, "jev.json"), encoding="utf-8") as f:
+        cfg = json.load(f)
+    cache = os.path.join(HOME, "ov_cache")
+    os.makedirs(cache, exist_ok=True)
+    core.set_property({"CACHE_DIR": cache})  # the NPU compile happens once per model and driver
+    graph = cfg["graphs"].get(device, cfg["graphs"]["CPU"])
+    return cfg, graph, core.compile_model(os.path.join(model_dir, graph), device, {"PERFORMANCE_HINT": "LATENCY"}).create_infer_request()
+
+
+def compile_only(device: str, model_dir: str) -> int:
+    """Child mode (jevai.exe --compile DEVICE): compile the model for DEVICE into the cache and print one JSON line for
+    the runner (prepare): ok and seconds, missing (no such device) or the error."""
+    t = time.time()
+    try:
+        import openvino as ov
+        core = ov.Core()
+        if device not in core.available_devices:
+            print(json.dumps({"ok": False, "missing": True}), flush=True)
+            return 2
+        compile_graph(core, model_dir, device)
+    except Exception as e:  # noqa: BLE001 - reported to the runner
+        print(json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"}), flush=True)
+        return 1
+    print(json.dumps({"ok": True, "seconds": round(time.time() - t, 1)}), flush=True)
+    return 0
+
+
+def child_command(model_dir: str, device: str) -> list[str]:
+    """This runner again, in child mode: jevai.exe itself when frozen, else this module."""
+    me = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", __spec__.name]
+    return me + ["--compile", device, "--model", model_dir]
+
+
+def compile_child(model_dir: str, device: str, limit: float) -> tuple[bool, str]:
+    """Compile the model for `device` in a child process, which (unlike a compile in this process) can be stopped:
+    (True, how long) or (False, why; "missing" when there is no such device). Says every PROGRESS seconds that it is
+    still compiling, and stops the child after `limit` seconds."""
+    os.makedirs(os.path.join(HOME, "ov_cache"), exist_ok=True)
+    out = os.path.join(HOME, "ov_cache", f"compile_{device}.txt")
+    with open(out, "w", encoding="utf-8") as f:
+        p = subprocess.Popen(child_command(model_dir, device), stdout=f, stderr=subprocess.STDOUT,
+                             creationflags=NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS)
+    span = lambda s: f"{s / 60:.0f} min" if s >= 90 else f"{s:.0f}s"  # noqa: E731
+    t = time.time()
+    note = t + PROGRESS
+    while p.poll() is None:
+        time.sleep(1)
+        if time.time() - t > limit:
+            p.kill()
+            p.wait()
+            return False, f"not done after {span(limit)}, stopped"
+        if time.time() >= note:
+            print(f"still compiling the model for the {device}: {span(time.time() - t)} (JevAI stops at {span(limit)})",
+                  flush=True)
+            note += PROGRESS
+    lines = _read(out).strip().splitlines() or [f"exit code {p.returncode}, no output"]
+    try:
+        r = json.loads(lines[-1])
+    except ValueError:
+        return False, lines[-1]
+    return (True, f"{r.get('seconds', 0):.0f}s") if r.get("ok") else (False, "missing" if r.get("missing") else r.get("error", "?"))
+
+
+def ov_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("openvino")
+    except Exception:  # noqa: BLE001 - only part of a cache key
+        return "?"
+
+
+def _model_key(model_dir: str) -> str:
+    """This model's NPU graph (folder, size, time) and the OpenVINO version: a new model or runtime tries the NPU again."""
+    try:
+        with open(os.path.join(model_dir, "jev.json"), encoding="utf-8") as f:
+            graph = json.load(f)["graphs"]["NPU"]
+        st = os.stat(os.path.join(model_dir, os.path.splitext(graph)[0] + ".bin"))
+        stamp = f"{st.st_size}|{int(st.st_mtime)}"
+    except (OSError, ValueError, KeyError):
+        stamp = "?"
+    return f"{os.path.normcase(os.path.abspath(model_dir))}|{stamp}|{ov_version()}"
+
+
+def _npu_skip_path() -> str:
+    return os.path.join(HOME, "ov_cache", "npu_skip.json")
+
+
+def prepare(model_dir: str, device: str = "auto") -> str | None:
+    """Compile the model into the cache and return the device the runner will use (None: none worked). With "auto" the
+    NPU comes first unless it failed or timed out before for this model and OpenVINO (npu_skip.json), then the CPU.
+    Each device compiles in a child process stopped after LIMIT; from a warm cache this takes seconds, so the runner
+    does it at install, when it starts and when a game starts, and the model is ready before HOI4 has loaded."""
+    if not os.path.isfile(os.path.join(model_dir, "jev.json")):
+        print(f"no model in {model_dir}", flush=True)
+        return None
+    try:
+        skip = json.loads(_read(_npu_skip_path()) or "{}")
+    except ValueError:
+        skip = {}
+    key = _model_key(model_dir)
+    if device != "auto":
+        tries = [device]
+    elif key in skip:
+        tries = ["CPU"]
+        print(f"the NPU failed before for this model ({skip[key]}); using the CPU (jevai.exe --device NPU retries)", flush=True)
+    else:
+        tries = ["NPU", "CPU"]
+    for dev in tries:
+        ok, detail = compile_child(model_dir, dev, LIMIT.get(dev, LIMIT["NPU"]))
+        if ok:
+            print(f"model prepared on {dev} in {detail}", flush=True)
+            if dev == "NPU" and skip.pop(key, None):
+                write_atomic(_npu_skip_path(), json.dumps(skip, indent=1))
+            return dev
+        if detail == "missing":
+            continue
+        print(f"the model could not be prepared on {dev}: {detail}", flush=True)
+        if dev == "NPU" and device == "auto":
+            skip[key] = f"{detail}, {time.strftime('%Y-%m-%d')}"
+            write_atomic(_npu_skip_path(), json.dumps(skip, indent=1))
+            print("later games use the CPU for this model; jevai.exe --device NPU retries the NPU", flush=True)
+    return None
+
+
 class Model:
-    """The exported IR on one device: NPU if present (its own graph, compiled once and cached), else CPU."""
+    """The exported IR on one device, loaded from the cache that prepare filled; if the NPU fails here anyway, the CPU."""
 
     def __init__(self, model_dir: str, device: str = "auto"):
         import openvino as ov
-        with open(os.path.join(model_dir, "jev.json"), encoding="utf-8") as f:
-            self.cfg = json.load(f)
         core = ov.Core()
-        devices = core.available_devices
         if device == "auto":
-            device = "NPU" if "NPU" in devices else "CPU"
-        self.device = device
-        cache = os.path.join(HOME, "ov_cache")
-        os.makedirs(cache, exist_ok=True)
-        core.set_property({"CACHE_DIR": cache})  # the NPU compile happens once per model and driver
-        graph = self.cfg["graphs"].get(device, self.cfg["graphs"]["CPU"])
-        t = time.time()
-        self.req = core.compile_model(os.path.join(model_dir, graph), device, {"PERFORMANCE_HINT": "LATENCY"}).create_infer_request()
-        print(f"model on {device} ({graph}) ready in {time.time() - t:.0f}s", flush=True)
+            device = "NPU" if "NPU" in core.available_devices else "CPU"
+        tries = [device] + (["CPU"] if device == "NPU" else [])
+        for i, dev in enumerate(tries):
+            print(f"loading the model on {dev}", flush=True)
+            t = time.time()
+            try:
+                self.cfg, graph, self.req = compile_graph(core, model_dir, dev)
+            except Exception as e:  # noqa: BLE001 - try the next device; the last one's error goes to the caller
+                if i == len(tries) - 1:
+                    raise
+                print(f"the model failed on {dev}: {e}", flush=True)
+                continue
+            self.device = dev
+            print(f"model on {dev} ({graph}) ready in {time.time() - t:.0f}s", flush=True)
+            break
         self.packer = Packer(model_dir, self.cfg["max_state_tokens"], self.cfg["seq"])
 
     def scores(self, state: str, horizon: int, weights=(1.0, 1.0, 0.5)) -> list[float]:
@@ -378,42 +619,62 @@ class Tee:
             st.flush()
 
 
-def session(a, out_dir: str, pid: int):
-    """Steer one running game until its process `pid` exits: load the English names and the model (from the NPU cache
-    after the first time) while the game loads, then decide on each update the mod logs."""
+def model_dir(a, mod: str) -> str:
+    """--model, else the runner/model of the JevAI copy the game uses, else the one of --mod."""
+    d = os.path.join(mod, "runner", "model")
+    return a.model or (d if os.path.isfile(os.path.join(d, "jev.json")) else os.path.join(a.mod, "runner", "model"))
+
+
+def session(a, mod: str, pid: int):
+    """Steer one running game until its process `pid` exits: load the English names and the model (prepared into the
+    cache already, normally: seconds) while the game loads, then decide on the updates the mod logs, once per period
+    the player chose. Says once why, if the game logs nothing for JevAI."""
+    orders = os.path.join(mod, "history", "units", ORDERS + ".txt")
+    write_atomic(orders, orders_file({}, "no update yet", "-"))  # not the last game's
+    log = GameLog(a.userdir)
+    print(f"reading {log.path}; orders go to {orders}", flush=True)
     ready: dict = {}
 
-    def prepare():
+    def load():
         try:
             exe = find_game()
             ready["names"] = english_names(([os.path.dirname(exe)] if exe else []) + active_mods(a.userdir))
-            ready["model"] = Model(a.model, a.device)
+            md = model_dir(a, mod)
+            device = prepare(md, a.device)  # a warm cache: seconds; else compiles within the time limits
+            if device is None:
+                raise RuntimeError("no device could run the model (see above)")
+            ready["model"] = Model(md, device)
         except Exception as e:  # noqa: BLE001 - reported below; the game keeps running without the model
             ready["error"] = e
 
-    loader = threading.Thread(target=prepare, daemon=True)
+    loader = threading.Thread(target=load, daemon=True)
     loader.start()
-    write_atomic(os.path.join(out_dir, ORDERS + ".txt"), orders_file({}, "no update yet", "-"))  # not the last game's
-    log = GameLog(a.userdir)
-    model = names_en = None
-    checked = time.time()
+    model = names_en = last = None  # last: game day of the last decision
+    per_country = 0.0  # seconds, from the last batch
+    started = checked = time.time()
+    explained = False
     while True:
         if time.time() - checked > 5:
             checked = time.time()
             if pid not in pids("hoi4.exe"):
                 return
+            if not explained and (why := silence(a.userdir, log, checked - started)):
+                print(why, flush=True)
+                explained = True
         log.poll()
         if model is None:
             if "error" in ready:
-                print(f"model failed to load: {ready['error']}", flush=True)
+                print(f"model failed to load: {ready['error']}; JevAI sits out this game", flush=True)
+                while pid in pids("hoi4.exe"):
+                    time.sleep(5)
                 return
             if loader.is_alive():
                 time.sleep(1)
                 continue
             model, names_en = ready["model"], ready["names"]
+            per_country = 1.5 if model.device == "NPU" else 10.0
             log.complete(quiet=0)  # what was logged before the model was ready is history; decide from the next update
-            print("waiting for the next update (every country on the 1st of the month; major powers weekly in that mode)",
-                  flush=True)
+            print("waiting for the game's next update (the 1st of each month, or weekly with the weekly period)", flush=True)
         done = log.complete()
         if not done:
             time.sleep(1)
@@ -424,12 +685,19 @@ def session(a, out_dir: str, pid: int):
             print(f"{now}: " + ("waiting for the JevAI choice in the start-of-game event" if log.mode is None
                                 else "JevAI is off for this game (vanilla AI)"), flush=True)
             continue
+        period = log.period or ("week" if log.mode == "majors" else "month")  # saves from JevAI 0.2 log no period
+        if not due(period, last, game_day(date)):
+            continue
         recs, names, humans, majors = log_records([p for ls in log.latest.values() for p in ls], names_en, date)
         humans |= set(filter(None, a.player.split(",")))
         elig = [t for t in reported if t in recs and t not in humans and recs[t]["mil"] + recs[t]["civ"] >= a.min_factories
                 and (log.mode == "all" or t in majors)]
         if not elig:
             continue
+        head = f"{now} ({log.mode}, {period})"
+        if (est := len(elig) * per_country) > 20:  # a CPU takes minutes for a big batch: say so before it starts
+            print(f"{head}: deciding {len(elig)} countries on {model.device}, about "
+                  + (f"{est:.0f}s" if est < 120 else f"{est / 60:.0f} min"), flush=True)
         t0 = time.time()
         chosen = {}
         for t in elig:
@@ -437,9 +705,11 @@ def session(a, out_dir: str, pid: int):
             best, cur = int(np.argmax(u)), int(recs[t]["jev"].get("pos") or 0) - 1  # cur: posture in force, -1 none
             # near-ties flip with tiny changes (even the date): switch only for a clear gain
             chosen[t] = (cur if 0 <= cur < len(u) and u[best] - u[cur] < a.stick else best) + 1
-        write_atomic(os.path.join(out_dir, ORDERS + ".txt"), orders_file(chosen, date, model.device))
+        write_atomic(orders, orders_file(chosen, date, model.device))
+        last, per_country = game_day(date), (time.time() - t0) / len(elig)
         top = sorted(chosen.items(), key=lambda kv: -(recs[kv[0]]["mil"] + recs[kv[0]]["civ"]))[:6]
-        print(f"{now} ({log.mode}): {len(chosen)} countries in {time.time() - t0:.0f}s on {model.device}; "
+        skipped = f"; {len(done) - 1} older updates skipped" if len(done) > 1 else ""
+        print(f"{head}: {len(chosen)} countries in {time.time() - t0:.0f}s on {model.device}{skipped}; "
               + ", ".join(f"{t} {POSTURES[k - 1]}" for t, k in top), flush=True)
 
 
@@ -448,51 +718,61 @@ def main(argv=None):
     ap.add_argument("--install", action="store_true", help="start JevAI with Windows (hidden) and right away")
     ap.add_argument("--uninstall", action="store_true", help="stop starting with Windows and stop the background runner")
     ap.add_argument("--hidden", action="store_true", help="no window (how the Startup shortcut runs it)")
-    ap.add_argument("--userdir", default=default_userdir())
-    ap.add_argument("--mod", default=os.path.dirname(here()), help="the JevAI mod folder (default: the one jevai.exe is in)")
-    ap.add_argument("--model", help="exported model folder (default: <mod>/runner/model)")
+    ap.add_argument("--userdir", default=default_userdir(), help="HOI4's user folder (default: the one in Documents)")
+    ap.add_argument("--mod", default=os.path.dirname(here()),
+                    help="the JevAI mod folder (default: the one jevai.exe is in); games use the copy enabled in the playset")
+    ap.add_argument("--model", help="exported model folder (default: runner/model of the JevAI copy the game uses)")
     ap.add_argument("--device", default="auto", choices=["auto", "NPU", "CPU", "GPU"])
     ap.add_argument("--horizon", type=int, default=6, help="months the posture questions look ahead")
     ap.add_argument("--stick", type=float, default=0.01, help="keep the current posture unless another scores this much higher")
     ap.add_argument("--min-factories", type=int, default=20, help="skip countries with fewer military + civilian factories")
     ap.add_argument("--player", default="", help="extra tag(s) never to steer, comma separated (humans are excluded anyway)")
+    ap.add_argument("--compile", metavar="DEVICE", help=argparse.SUPPRESS)  # child mode, see prepare
     a = ap.parse_args(argv)
     a.mod = os.path.abspath(a.mod)
-    a.model = a.model or os.path.join(a.mod, "runner", "model")
+    if a.compile:
+        return compile_only(a.compile, a.model or os.path.join(a.mod, "runner", "model"))
+    if sys.stdout:  # a process started without a console has none
+        sys.stdout.reconfigure(errors="replace")  # mod names can be in any script; a cp1252 stdout must not crash
+    os.makedirs(HOME, exist_ok=True)
+    sys.stdout = Tee(*filter(None, [sys.stdout]), open(os.path.join(HOME, "jevai.log"), "a", encoding="utf-8"))
     if a.install or a.uninstall:
         if a.uninstall:
             return uninstall()
         if not getattr(sys, "frozen", False):
             sys.exit("--install works from jevai.exe")
-        return install(a.mod)
+        return install(a.mod, a.model)
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     if a.hidden:
         ctypes.windll.user32.ShowWindow(k32.GetConsoleWindow(), 0)
     mutex = k32.CreateMutexW(None, False, r"Local\JevAIRunner")  # one runner per user
     if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
         sys.exit("JevAI is already running")
-    sys.stdout.reconfigure(errors="replace")  # mod names can be in any script; a redirected cp1252 stdout must not crash
-    os.makedirs(HOME, exist_ok=True)
-    sys.stdout = Tee(sys.stdout, open(os.path.join(HOME, "jevai.log"), "a", encoding="utf-8"))
     print(f"\n=== JevAI runner started {time.strftime('%Y-%m-%d %H:%M:%S')} for {a.mod}", flush=True)
-    out_dir = os.path.join(a.mod, "history", "units")
-    if not os.path.isdir(out_dir):
+    if not os.path.isdir(os.path.join(a.mod, "history", "units")):
         sys.exit(f"JevAI mod not found in {a.mod}; run install.cmd from the mod's runner folder")
+    prepare(model_dir(a, a.mod), a.device)  # the compile check at start: a warm cache before the next game
     n_deps = None
     while True:
         deps = patch_load_order(a.userdir, a.mod)  # before each game, so a newly installed overhaul is covered
         if len(deps) != n_deps:
             n_deps = len(deps)
             print(f"JevAI loads after {n_deps} overhaul mods (read by the launcher at its next start)", flush=True)
-        print("waiting for HOI4 (start it from the Paradox launcher)", flush=True)
+        print(f"waiting for HOI4 (start it from the Paradox launcher; user folder {a.userdir})", flush=True)
         while not (running := pids("hoi4.exe")):
             time.sleep(5)
-        print(f"[{time.strftime('%H:%M:%S')}] HOI4 started (pid {running[0]}); loading the model", flush=True)
-        if src := updated_runner(a.mod):  # Steam updated the mod: the new runner reinstalls itself and takes over
+        print(f"[{time.strftime('%H:%M:%S')}] HOI4 started (pid {running[0]})", flush=True)
+        mod = game_mod(a)  # the launcher wrote the playset just before starting the game
+        if src := updated_runner(mod):  # Steam updated the mod: the new runner reinstalls itself and takes over
             print(f"the mod's runner was updated; reinstalling from {src}", flush=True)
-            subprocess.Popen([src, "--install", "--mod", a.mod], creationflags=NO_WINDOW)
+            subprocess.Popen([src, "--install", "--mod", mod], creationflags=NO_WINDOW)
             return
-        session(a, out_dir, running[0])
+        try:
+            session(a, mod, running[0])
+        except Exception:  # noqa: BLE001 - the background runner must outlive a bug: log it, sit out this game
+            print(traceback.format_exc(), flush=True)
+            while running[0] in pids("hoi4.exe"):
+                time.sleep(5)
         print(f"[{time.strftime('%H:%M:%S')}] HOI4 closed", flush=True)
     del mutex
 

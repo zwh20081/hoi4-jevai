@@ -1,6 +1,11 @@
 ﻿l_german:
  jevai.1.t: "JevAI: Wen soll das Modell führen?"
- jevai.1.d: "JevAI ersetzt einen Teil der KI-Strategie durch ein trainiertes Modell. Jeden Monat (jede Woche, wenn nur Großmächte gewählt sind) wählt es für die KI-Länder, die es führt, eine strategische Ausrichtung (defensiver Ausbau, industrielle Expansion, Panzeroffensive, Luftmacht, Seemacht oder totale Kriegswirtschaft). Ihr eigenes Land bleibt unberührt.\n\nDas Modell läuft in jevai.exe neben dem Spiel; solange es nicht läuft, behalten die Länder ihre letzte Ausrichtung."
+ jevai.1.d: "JevAI ersetzt einen Teil der KI-Strategie durch ein trainiertes Modell. Es wählt für die KI-Länder, die es führt, eine strategische Ausrichtung (defensiver Ausbau, industrielle Expansion, Panzeroffensive, Luftmacht, Seemacht oder totale Kriegswirtschaft), so oft, wie Sie als Nächstes festlegen. Ihr eigenes Land bleibt unberührt.\n\nDas Modell läuft in jevai.exe neben dem Spiel; solange es nicht läuft, behalten die Länder ihre letzte Ausrichtung."
  jevai.1.a: "Nur Großmächte"
  jevai.1.b: "Alle KI-Länder"
  jevai.1.c: "Keine (Standard-KI)"
+ jevai.2.t: "JevAI: Wie oft soll das Modell entscheiden?"
+ jevai.2.d: "Wöchentliche Entscheidungen reagieren am schnellsten auf den Kriegsverlauf, brauchen aber die meiste Rechenleistung: etwa 1,5 Sekunden pro Land auf einer Intel-NPU und etwa 10 Sekunden auf einer CPU. Monatlich entspricht den Partien, aus denen das Modell gelernt hat. Alle 3 Monate ist am sparsamsten und passt zu langsameren Rechnern."
+ jevai.2.a: "Jede Woche"
+ jevai.2.b: "Jeden Monat"
+ jevai.2.c: "Alle 3 Monate"

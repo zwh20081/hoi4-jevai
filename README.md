@@ -1,7 +1,7 @@
 # JevAI
 
-JevAI lets a trained model steer the Hearts of Iron IV AI. Every game month (every week for major powers, if you
-choose), a fine-tuned [open-jev-deberta-v3-large](https://huggingface.co/com-kotobalabs/open-jev-deberta-v3-large)
+JevAI lets a trained model steer the Hearts of Iron IV AI. Every week, month or 3 months (you choose, and whether it
+commands the major powers or all AI countries), a fine-tuned [open-jev-deberta-v3-large](https://huggingface.co/com-kotobalabs/open-jev-deberta-v3-large)
 reads each AI country's situation as text, scores six strategic postures, and the mod applies the best one to that
 country's AI. The games JevAI collects are also its training data: decisions there are partly random with known odds,
 so what happened afterwards is a causal label for the posture taken.
@@ -20,23 +20,33 @@ one, otherwise on the CPU.
    to it.
 2. Start the companion runner from the mod's `runner` folder. For a Workshop subscription, that folder is
    `<Steam library>\steamapps\workshop\content\394360\3808093078\runner`:
-   - Run `install.cmd` once to copy the runner to `%LOCALAPPDATA%\jevai`, start it now, and start it at Windows sign-in.
+   - Run `install.cmd` once to copy the runner to `%LOCALAPPDATA%\jevai`, prepare the model (about 2 minutes on an
+     Intel NPU, seconds on a CPU), start it now, and start it at Windows sign-in.
    - Or run `jevai.exe` before each game, keep its console open while playing, and press Ctrl+C to stop it afterward.
      This does not add a Windows Startup entry.
    SmartScreen may warn about the unsigned `jevai.exe` (More info, Run anyway).
-3. Play from the Paradox launcher with JevAI in the playset. An event at the start of each game asks who the model
-   commands: major powers (decided weekly), all AI countries with 20+ factories (monthly), or none.
+3. Play from the Paradox launcher with JevAI in the playset. Keep only one mod named JevAI: with a local copy of the
+   same name next to the Workshop item, HOI4 skipped the enabled Workshop copy. Two events at the start of each game
+   ask who the model commands (major powers, all AI countries with 20+ factories, or none) and how often it decides
+   (every week, month or 3 months).
 
-The first game compiles the model for the NPU (about 2 minutes, while the game loads); later games load it from the
-cache. A decision takes about 1.5 s per country on the NPU. `%LOCALAPPDATA%\jevai\jevai.log` has one line per update,
-and `runner\uninstall.cmd` removes the installed runner, its model cache and the Startup entry. Multiplayer is not supported:
-each player's game would read its own orders. With overhaul mods, JevAI loads after them, but the model has only seen
-vanilla 1936 games.
+The model is compiled once before any game: by `install.cmd`, or by `jevai.exe` when it starts (about 2 minutes on an
+Intel NPU, seconds on a CPU). The runner checks it again whenever it starts and when a game starts, so games load it
+from the cache in seconds, before HOI4 has finished loading. An NPU compile that fails or takes more than 10 minutes
+is stopped and JevAI uses the CPU from then on (`jevai.exe --device NPU`, a reinstall or a new model tries the NPU
+again). A decision takes about 1.5 s per country on the NPU and about 10 s on a CPU, so on a CPU weekly decisions for
+all AI countries fall behind the game (the runner then decides the newest update and says how many it skipped).
+`%LOCALAPPDATA%\jevai\jevai.log` has one line per update, says which `game.log` it reads and where the orders go, and
+explains a game that logs nothing for JevAI (JevAI not loaded, or its scripts replaced by an overhaul mod).
+`runner\uninstall.cmd` removes the installed runner, its model cache and the Startup entry. Multiplayer is not
+supported: each player's game would read its own orders. With overhaul mods, JevAI loads after them, but the model has
+only seen vanilla 1936 games.
 
 No game console, launch option or memory access is involved. The mod logs each country's state to `game.log`
 (`scripted_effects/jevai_state.txt`); the runner (`mods/jevai/runtime/runner.py`, frozen as `jevai.exe`) reads the
-log, scores the postures and writes `history/units/JEVAI_orders.txt` in the mod folder, which the mod reloads daily
-with `load_oob`.
+log in HOI4's user folder (in the Windows Documents folder, also when OneDrive moved it), scores the postures and
+writes `history/units/JEVAI_orders.txt` in the JevAI copy the playset enables, which the mod reloads daily with
+`load_oob`.
 
 ## How the model is made
 
@@ -140,6 +150,9 @@ skill on the test games against predicting the label frequencies (`trainer.evalu
   with a decision (stock -0.271).
 - OpenVINO on an Intel Core Ultra NPU: 233 ms per sequence (a country needs 6), probabilities within 0.0025 of
   PyTorch.
+- OpenVINO on the CPU (Core Ultra X9 388H, HOI4 running alongside): the CPU graph compiles in 4.4 s (0.6 s from the
+  cache), 1.4 to 1.6 s per sequence, about 9 s per country, 2.3 GB of memory. In vanilla games 11 countries have 20+
+  factories in 1936, 29 in 1938 and 40 to 47 from 1940.
 
 ## License
 

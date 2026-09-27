@@ -30,6 +30,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -138,8 +139,14 @@ def uninstall():
     if os.path.exists(STARTUP_LINK):
         os.remove(STARTUP_LINK)
     stop_others()
+
+    def writable(func, path, exc):  # OpenVINO writes its cache blobs read-only
+        if not isinstance(exc, FileNotFoundError):
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+
     for d in ("runner", "ov_cache"):  # only what the runner made: HOME can also hold the collector's inst/
-        shutil.rmtree(os.path.join(HOME, d), ignore_errors=True)
+        shutil.rmtree(os.path.join(HOME, d), onexc=writable)
     print("JevAI no longer starts with Windows; the background runner, its copy and its model cache are removed.")
 
 
@@ -181,8 +188,10 @@ def _read(path: str) -> str:
 
 
 def _mod_root(userdir: str, descriptor_text: str) -> str | None:
+    """A .mod file's folder in one Windows spelling: the launcher writes forward slashes, and OpenVINO's cache key is the
+    model path as written, so D:/x and D:\\x would compile the model twice."""
     p = re.search(r'^\s*path\s*=\s*"([^"]+)"', descriptor_text, re.M)
-    return None if not p else p.group(1) if os.path.isabs(p.group(1)) else os.path.join(userdir, p.group(1))
+    return None if not p else os.path.normpath(p.group(1) if os.path.isabs(p.group(1)) else os.path.join(userdir, p.group(1)))
 
 
 def enabled_mods(userdir: str) -> list[str]:
@@ -430,7 +439,8 @@ def compile_graph(core, model_dir: str, device: str) -> tuple[dict, str, object]
     os.makedirs(cache, exist_ok=True)
     core.set_property({"CACHE_DIR": cache})  # the NPU compile happens once per model and driver
     graph = cfg["graphs"].get(device, cfg["graphs"]["CPU"])
-    return cfg, graph, core.compile_model(os.path.join(model_dir, graph), device, {"PERFORMANCE_HINT": "LATENCY"}).create_infer_request()
+    path = os.path.normpath(os.path.abspath(os.path.join(model_dir, graph)))  # the cache key is this string
+    return cfg, graph, core.compile_model(path, device, {"PERFORMANCE_HINT": "LATENCY"}).create_infer_request()
 
 
 def compile_only(device: str, model_dir: str) -> int:

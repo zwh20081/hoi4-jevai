@@ -53,7 +53,8 @@ device stopped after `runner.LIMIT` (NPU 10 min, CPU 5; the NPU takes ~2.5 min o
 or time-out is recorded in `ov_cache\npu_skip.json` (keyed by model files and OpenVINO version; `--device NPU`, a
 reinstall or a new model retries) and later runs use the CPU. It runs at install (progress in the install window), when
 the runner starts and when a game starts; from a warm cache that takes seconds, so `runner.Model` loads before HOI4 has
-finished loading. Running from the copy keeps the mod folder unlocked, so Steam can update the Workshop item;
+finished loading. OpenVINO's cache key is the model path as written (`D:/x` and `D:\x` compile twice) and its blobs are
+read-only, so `runner.compile_graph` normalizes the path and `uninstall` clears the read-only bit before deleting. Running from the copy keeps the mod folder unlocked, so Steam can update the Workshop item;
 when HOI4 starts and the mod's `jevai.exe` differs from the copy (size, mtime), the copy runs the mod's
 `jevai.exe --install` and exits (`runner.updated_runner`). The runner (one per user, named mutex) waits for
 `hoi4.exe`, then works with the JevAI copy the playset enables (`runner.game_mod`: the `.mod` named JevAI in

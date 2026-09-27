@@ -1,4 +1,4 @@
-version="0.3.0"
+version="0.3.1"
 name="JevAI"
 remote_file_id="3808093078"
 supported_version="1.19.*"

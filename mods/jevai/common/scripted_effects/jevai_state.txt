@@ -1,3 +1,40 @@
+# The player's choices for the runner (JEV|MODE, JEV|PERIOD), at most once a day: on_startup (new games) and every
+# weekly and monthly update, since on_startup does not run for a loaded save. Also gives saves from JevAI 0.2 (no
+# period) their old pace, and asks the start-of-game questions in a campaign that has never answered them (jevai.1
+# fires only once).
+jev_announce = {
+	if = {
+		limit = { NOT = { has_global_flag = jevai_announced } }
+		set_global_flag = { flag = jevai_announced value = 1 days = 1 }
+		if = {
+			limit = {
+				NOT = { has_global_flag = jevai_period_week }
+				NOT = { has_global_flag = jevai_period_month }
+				NOT = { has_global_flag = jevai_period_quarter }
+			}
+			if = { limit = { has_global_flag = jevai_mode_majors } set_global_flag = jevai_period_week }
+			if = { limit = { has_global_flag = jevai_mode_all } set_global_flag = jevai_period_month }
+		}
+		if = { limit = { has_global_flag = jevai_mode_all } log = "JEV|MODE|all" }
+		if = { limit = { has_global_flag = jevai_mode_majors } log = "JEV|MODE|majors" }
+		if = { limit = { has_global_flag = jevai_mode_off } log = "JEV|MODE|off" }
+		if = { limit = { has_global_flag = jevai_period_week } log = "JEV|PERIOD|week" }
+		if = { limit = { has_global_flag = jevai_period_month } log = "JEV|PERIOD|month" }
+		if = { limit = { has_global_flag = jevai_period_quarter } log = "JEV|PERIOD|quarter" }
+		if = {
+			limit = {
+				NOT = { has_global_flag = jevai_mode_majors }
+				NOT = { has_global_flag = jevai_mode_all }
+				NOT = { has_global_flag = jevai_mode_off }
+			}
+			every_country = {
+				limit = { is_ai = no }
+				country_event = { id = jevai.1 days = 1 }
+			}
+		}
+	}
+}
+
 # What the runner (jevai.exe, runtime/runner.py log_records) reads about a country, logged to game.log:
 # T = stability, war support, strength ratios, posture in force; S = the numbers of the state text; G = ideology group
 # key (language independent); H = human-played; MAJOR; N/E/A = one line per neighbour / enemy / ally.

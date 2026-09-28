@@ -75,9 +75,12 @@ stays English in any game language (modded ideology groups keep their localized 
 and equipment requests are not available to scripts: the text shows 0 / omits them (a known difference from the
 dump-built training text; everything else matched on 91/91 countries of a real month, `temp/checks/check_logpath.py`).
 Two start-of-game events (`events/jevai.txt`) set the range (`jevai.1`: major powers, all AI countries with
-`--min-factories` 20+, or none; `JEV|MODE|majors|all|off`) and the period (`jevai.2`: `JEV|PERIOD|week|month|quarter`);
-`on_startup` logs both again on each load and gives saves from 0.2, which have no period, their old pace (majors
-weekly, all AI monthly). The newest completed burst is decided for the countries in range once `runner.due` allows it
+`--min-factories` 20+, or none; `JEV|MODE|majors|all|off`) and the period (`jevai.2`: `JEV|PERIOD|week|month|quarter`).
+`on_startup` only runs for a new game, never for a loaded save (measured 2026-09-28), so `jev_announce`
+(`scripted_effects/jevai_state.txt`) runs from it and from every weekly and monthly update, at most once a day: it logs
+both, gives saves from 0.2 (no period) their old pace (majors weekly, all AI monthly), and asks the questions in a
+campaign that never answered them (an unanswered event times out after 13 days to its first option). With `-debug`,
+the game glues an empty log line in front of each `log` effect line, so test parsers search for `]: JEV|`. The newest completed burst is decided for the countries in range once `runner.due` allows it
 (at least 7/28/89 game days since the last decision; at once after loading an earlier save), keeping the current
 posture unless another scores `--stick` (0.01) higher; on a CPU a batch longer than ~20 s is announced first, and
 updates that arrived meanwhile are reported as skipped. The orders go to `history/units/JEVAI_orders.txt` of that

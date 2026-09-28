@@ -4,7 +4,8 @@ add_namespace = jevai
 # (jevai.1), then how often the model decides for them (jevai.2). The range is kept in the global flag jevai_mode_all
 # (all AI countries), jevai_mode_majors (major powers only) or jevai_mode_off, the period in jevai_period_week,
 # jevai_period_month or jevai_period_quarter. jev_follow_orders reads the range; the runner reads both from game.log
-# (JEV|MODE, JEV|PERIOD; on_startup logs them again on each load). Nothing is changed before the player answers.
+# (JEV|MODE, JEV|PERIOD; jev_announce logs them again at every weekly and monthly update, so loaded saves have them).
+# Nothing is changed before the player answers.
 country_event = {
 	id = jevai.1
 	title = jevai.1.t

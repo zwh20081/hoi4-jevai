@@ -51,7 +51,8 @@ Status: proposed, 2026-09-28. Goal: JevAI steers the AI countries of a multiplay
   with `SetLobbyData("orders", ...)`.
 - Client relay: finds the lobby with `RequestLobbyList` filtered on the code, joins it, polls `GetLobbyData` every
   second and writes each new set to its orders file.
-- Wire format: `TARGET|TAG:k,TAG:k,...` (a few hundred bytes; lobby data values hold up to 8 KB).
+- Wire format: the orders file itself, zlib-compressed and base64-encoded (about 1 KB for a hundred countries; lobby
+  data values hold up to 8 KB), so every player's file is byte-identical and the relay parses nothing.
 - The relay logs every set it publishes or receives, with its target date and arrival time.
 
 ### Orders with a target date

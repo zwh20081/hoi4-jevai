@@ -1,13 +1,13 @@
-[h1]JevAI v2 model · experimental multiplayer[/h1]
+[h1]A trained model runs the AI's strategy[/h1]
 
 JevAI uses a locally running DeBERTa-v3-large model to choose strategic priorities for AI countries. It changes AI priorities, not combat bonuses, and excludes human-controlled countries. The native game AI still handles the units.
 
-This release includes [b]v2 OpenVINO models for CPU and Intel NPU[/b], plus an [b]experimental multiplayer relay[/b]. v2 is a small supervised continuation on verified game outcomes. It is not proven stronger in live games; corrected offline evaluation still shows weaknesses.
+This release includes [b]OpenVINO models for CPU and Intel NPU[/b], plus an [b]experimental multiplayer relay[/b]. The model is a small supervised continuation on verified game outcomes. It is not proven stronger in live games; corrected offline evaluation still shows weaknesses.
 
 [h2]What it decides[/h2]
 The six postures are defensive buildup, industrial expansion, armored offensive, air power, naval power and total war economy. They affect AI production, unit mix, factory ratios and construction priorities.
 
-v2 predicts [b]three-month outcomes[/b]. That prediction horizon is separate from the decision frequency you choose in game: weekly, monthly or every three months. Choose major powers, all eligible AI countries (20+ factories), or off.
+The model predicts [b]three-month outcomes[/b]. That prediction horizon is separate from the decision frequency you choose in game: weekly, monthly or every three months. Choose major powers, all eligible AI countries (20+ factories), or off.
 
 [h2]Install and run[/h2]
 Windows 10/11 64-bit and HOI4 1.19 are required. Subscribe, enable JevAI in the launcher playset, and open:
@@ -18,7 +18,7 @@ Windows 10/11 64-bit and HOI4 1.19 are required. Subscribe, enable JevAI in the 
 [/list]
 The model files are included (the item is a few GB). First compilation depends on hardware; the log reports progress and timeouts. Cached starts are faster. NPU compilation has a ten-minute limit, CPU compilation five minutes; NPU failures fall back to CPU. CPU decisions can take time across many countries, so monthly or quarterly updates are usually more practical than weekly updates for all countries.
 
-Log: [b]%LOCALAPPDATA%\jevai\jevai.log[/b]. If no decisions appear, check that the playset enabled JevAI and read the runner's load/compile and missing-telemetry messages. Overhauls may replace scripts; the runner adjusts load-order dependencies for the next launch. v2 has seen several overhaul settings, but compatibility and strength are not guaranteed for every mod.
+Log: [b]%LOCALAPPDATA%\jevai\jevai.log[/b]. If no decisions appear, check that the playset enabled JevAI and read the runner's load/compile and missing-telemetry messages. Overhauls may replace scripts; the runner adjusts load-order dependencies for the next launch. The model has seen several overhaul settings, but compatibility and strength are not guaranteed for every mod.
 
 [h2]Experimental multiplayer[/h2]
 [b]Two-machine gameplay acceptance has not been completed. Late or missing orders can cause desync. Use this feature only if all players accept that limitation.[/b]
@@ -34,7 +34,7 @@ Single-player decisions run locally without a multiplayer relay. CPU/NPU numeric
 [h2]简体中文[/h2]
 JevAI 用本地模型为 AI 国家选择六种战略姿态：防御建设、工业扩张、装甲攻势、空中力量、海军力量、全面战争经济。它只改变 AI 优先事项，不提供战斗加成，不操控玩家国家；具体单位仍由游戏原生 AI 指挥。
 
-本版包含 [b]v2 CPU / Intel NPU OpenVINO 模型[/b]和[b]实验性多人功能[/b]。v2 经过少量真实游戏结果后训练，但尚未证明能提升实际游戏表现。默认预测未来[b]三个月[/b]，与开局选择的每周／每月／每三个月决策频率不同。
+本版包含 [b]CPU / Intel NPU OpenVINO 模型[/b]和[b]实验性多人功能[/b]。经过少量真实游戏结果后训练，但尚未证明能提升实际游戏表现。默认预测未来[b]三个月[/b]，与开局选择的每周／每月／每三个月决策频率不同。
 
 订阅并在启动器启用后，打开 [b]<Steam 库>\steamapps\workshop\content\394360\{id}\runner[/b]。运行一次 [b]install.cmd[/b]可准备模型并加入开机启动；[b]uninstall.cmd[/b]移除该启动方式。也可每次游戏前手动打开 [b]jevai.exe[/b]并保持窗口运行。需要 Windows 10/11 64 位、HOI4 1.19，无需另装 Python。首次编译时间取决于硬件，NPU 最长十分钟、CPU 五分钟；NPU 失败可回退 CPU。CPU 指挥较多国家时，建议每月或每三个月决策。
 
@@ -44,5 +44,5 @@ JevAI 用本地模型为 AI 国家选择六种战略姿态：防御建设、工�
 
 [h2]Source and model / 源码与模型[/h2]
 [url=https://github.com/zwh20081/hoi4-jevai]GitHub: source, tests and multiplayer acceptance guide[/url]
-[url=https://huggingface.co/zwh20081/hoi4-jevai]Hugging Face: v1, experimental v2 weights, OpenVINO and evaluation[/url]
+[url=https://huggingface.co/zwh20081/hoi4-jevai]Hugging Face: v1, experimental weights, OpenVINO and evaluation[/url]
 License: Apache-2.0.

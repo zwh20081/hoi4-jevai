@@ -40,7 +40,7 @@ JevAI 用本地模型为 AI 国家选择六种战略姿态：防御建设、工�
 
 [b]多人尚未完成双机实测，命令迟到或丢失可能导致不同步。[/b]所有玩家使用相同版本和播放集并运行伴随程序；主机运行 [b]host.cmd[/b]分享代码，其他玩家运行 [b]join.cmd[/b]输入代码。请在开局前设定角色。多人局只有主机做模型决策，客户端通过 Steam 接收带日期的同一命令文件；未配置角色时多人局不启用 JevAI。
 
-日志：[b]%LOCALAPPDATA%\jevai\jevai.log[/b]。本版的 CPU/NPU 数值一致性检查不能代替双机同步测试，也不代表模型已经更强。
+日志：[b]%LOCALAPPDATA%\jevai\jevai.log[/b]。本版的 CPU/NPU 数值一致性检查不能代替双机同步测试。
 
 [h2]Source and model / 源码与模型[/h2]
 [url=https://github.com/zwh20081/hoi4-jevai]GitHub: source, tests and multiplayer acceptance guide[/url]

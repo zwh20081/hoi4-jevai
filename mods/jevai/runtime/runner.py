@@ -309,6 +309,12 @@ def english_names(roots: list[str]) -> dict[str, str]:
     return names
 
 
+def day_date(day: int) -> str:
+    """game_day's inverse: the game date "y.m.d" of a day count."""
+    y, r = divmod(day - 1, 365)
+    m = max(i for i, s in enumerate(MONTH_START) if s <= r)
+    return f"{y}.{m + 1}.{r - MONTH_START[m] + 1}"
+
 class GameLog:
     """The mod's JEV lines, read from <userdir>/logs/game.log as the game writes them. Lines come in bursts (every
     country on the 1st of each month; the countries in range weekly with the weekly period), grouped here by game date.
@@ -324,6 +330,8 @@ class GameLog:
 
     def reset(self):
         self.pos, self.mode, self.period, self.bursts, self.latest, self.days, self.jev = 0, None, None, {}, {}, set(), False
+        self.now, self.multiplayer = 0, None
+        self.generation = getattr(self, "generation", 0) + 1
 
     def poll(self):
         try:
@@ -340,10 +348,17 @@ class GameLog:
         end = chunk.rfind(b"\n") + 1  # a line still being written waits for the next poll
         self.pos += end
         for line in chunk[:end].decode("utf-8", "replace").splitlines():
+            if "[[ Launching " in line:
+                pos = self.pos
+                self.reset()
+                self.pos = pos
+                self.multiplayer = "MULTIPLAYER" in line
+                continue
             m = LINE.match(line)
             if not m:
                 continue
             date = tuple(map(int, m.groups()[:3]))
+            self.now = 365 * date[0] + MONTH_START[date[1] - 1] + date[2]
             if len(self.days) < 3:
                 self.days.add(date)
             if not m.group(4).startswith("JEV|"):
@@ -596,13 +611,18 @@ class Model:
         return out
 
 
-def orders_file(postures: dict[str, int], date: str, device: str) -> str:
+def orders_file(postures: dict[str, int], date: str, device: str, target: str | None = None) -> str:
     """An OOB file whose instant_effect sets each country's wanted posture; the mod applies it to AI countries.
-    It holds no units, so loading it changes nothing but those variables."""
-    lines = [f"# JevAI orders for {date} ({device}); rewritten by the runner, reloaded daily by the mod\n",
-             "instant_effect = {\n"]
-    for tag, k in sorted(postures.items()):
-        lines.append(f"\tif = {{ limit = {{ country_exists = {tag} }} {tag} = {{ set_variable = {{ jev_want = {k} }} }} }}\n")
+    It holds no units, so loading it changes nothing but those variables. The set takes effect from `target` (default:
+    the update's own day, at once): every game of a multiplayer session reloads the file daily and applies the set
+    on the same game day, since the postures are synchronized state."""
+    lines = [f"# JevAI orders for {date} ({device}), from {target or date}; rewritten by the runner, reloaded daily by "
+             "the mod\n", "instant_effect = {\n"]
+    if postures:
+        lines.append(f"\tif = {{ limit = {{ date > {day_date(game_day(target or date) - 1)} }}\n")
+        for tag, k in sorted(postures.items()):
+            lines.append(f"\t\tif = {{ limit = {{ country_exists = {tag} }} {tag} = {{ set_variable = {{ jev_want = {k} }} }} }}\n")
+        lines.append("\t}\n")
     lines.append("}\n")
     return "".join(lines)
 

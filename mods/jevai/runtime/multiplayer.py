@@ -58,7 +58,8 @@ def load_role(home: str) -> dict | None:
             r = json.load(f)
     except (OSError, ValueError):
         return None
-    ok = isinstance(r, dict) and (r.get("role") == "host" or (r.get("role") == "client" and valid_code(str(r.get("code", "")))))
+    ok = isinstance(r, dict) and (r.get("role") == "host" or (r.get("role") == "client"
+          and isinstance(r.get("code"), str) and valid_code(r["code"])))
     if not ok or ("steam_api" in r and not isinstance(r["steam_api"], str)):
         return None
     if r["role"] == "client":

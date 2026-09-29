@@ -10,6 +10,12 @@ so what happened afterwards is a causal label for the posture taken.
 - The model: [huggingface.co/zwh20081/hoi4-jevai](https://huggingface.co/zwh20081/hoi4-jevai) (`torch/` the PyTorch
   bundle, `openvino/` the graphs the mod runs)
 
+The `0.4.0-experimental` package includes the v2 CPU/NPU OpenVINO model with a three-month prediction horizon.
+Versioned model files and evaluation are under `v2/` on Hugging Face; the root model folders retain v1.
+v2 is a small supervised continuation on verified overhaul-game outcomes, not a demonstrated increase in gameplay
+strength. CPU/NPU outputs were checked against PyTorch on four real states and all six postures; both devices chose
+the same options on that sample. This numerical check is separate from multiplayer gameplay acceptance.
+
 ## Play
 
 Needs Windows 10 or 11 (64-bit) and Hearts of Iron IV 1.19. The model runs on an Intel NPU (Core Ultra) if there is
@@ -38,15 +44,45 @@ again). A decision takes about 1.5 s per country on the NPU and about 10 s on a 
 all AI countries fall behind the game (the runner then decides the newest update and says how many it skipped).
 `%LOCALAPPDATA%\jevai\jevai.log` has one line per update, says which `game.log` it reads and where the orders go, and
 explains a game that logs nothing for JevAI (JevAI not loaded, or its scripts replaced by an overhaul mod).
-`runner\uninstall.cmd` removes the installed runner, its model cache and the Startup entry. Multiplayer is not
-supported: each player's game would read its own orders. With overhaul mods, JevAI loads after them, but the model has
-only seen vanilla 1936 games.
+`runner\uninstall.cmd` removes the installed runner, its model cache and the Startup entry. With overhaul mods,
+JevAI loads after them. v2 has seen several overhaul settings, but compatibility and policy quality are not guaranteed
+for every mod. Its three-month prediction horizon is separate from the weekly/monthly/quarterly decision frequency.
 
 No game console, launch option or memory access is involved. The mod logs each country's state to `game.log`
 (`scripted_effects/jevai_state.txt`); the runner (`mods/jevai/runtime/runner.py`, frozen as `jevai.exe`) reads the
 log in HOI4's user folder (in the Windows Documents folder, also when OneDrive moved it), scores the postures and
 writes `history/units/JEVAI_orders.txt` in the JevAI copy the playset enables, which the mod reloads daily with
 `load_oob`.
+
+## Experimental multiplayer
+
+The `0.4.0-experimental` build includes experimental multiplayer. Two-machine gameplay acceptance has not passed,
+so this is not a claim of desync-free play. Use matching game versions, playsets and
+JevAI builds on every machine, with Steam running and the companion runner installed or running manually.
+
+1. Before starting the multiplayer game, the host runs `runner\host.cmd` or `jevai.exe --host` and shares the code.
+2. Other players run `runner\join.cmd` and enter the code in JevAI's prompt, or run `jevai.exe --join CODE`.
+3. Leave each player's runner running. Only the host loads the model and decides; clients receive orders through
+   a Steam lobby. A multiplayer game without a configured role receives no JevAI decisions.
+
+The role is saved in `%LOCALAPPDATA%\jevai\multiplayer.json`; single-player ignores it. Configure roles before
+launching a game. Orders target the host's newest logged date plus three game days. That margin is unverified on
+real two-machine games: late or missing orders can cause desync. Host migration and mid-game joining are not
+supported. Relay failures are recorded in `%LOCALAPPDATA%\jevai\jevai.log`; stop the experiment if delivery fails.
+The single-player runner operates locally; multiplayer requires the Steam connection.
+
+If the default Steam API DLL cannot initialize, `--steam-api "C:\path\to\steam_api64.dll"` selects a compatible
+Steam API library when configuring the role. The relay loads it in a child process. Do not download arbitrary DLLs.
+
+Build the experimental package separately so the published build stays available:
+
+```text
+python -m mods.jevai.package --model temp/ov/hoi4-v2 --out temp/release-mp/jevai
+```
+
+Before claiming validated multiplayer support, two legitimate Steam accounts on two machines must verify matching
+`JEV|ACT` records across three game months, relay interruption and game resync. The current offline checks cannot
+establish that result. Follow the [acceptance guide](docs/multiplayer-acceptance.md) and its offline log comparison.
 
 ## How the model is made
 
@@ -57,7 +93,8 @@ writes `history/units/JEVAI_orders.txt` in the JevAI copy the playset enables, w
 - **The game** runs with `-dump_history`, which writes one JSON per game month: factories, divisions, fronts, wars,
   the AI's own strategy plans and the mod's telemetry.
 - **The runtime** (`mods/jevai/runtime`) turns a month into one text per country and asks the model three questions
-  per posture, 6 months ahead: power trend, no territory lost, territory gained. It picks the posture with the best
+  per posture at the model's configured horizon (three months for v2, six for legacy v1): power trend, no territory
+  lost, territory gained. It picks the posture with the best
   `P(no loss) + P(gain) + 0.5 * expected growth (0..1)`. Commands reach the game through its console, typed with
   SendInput (the game ignores posted window messages) and confirmed by an acknowledgement effect in the log.
 - **Collection** (`mods/collector`, in a Windows VM) runs several games at once. In Jev games a coin flip per country

@@ -45,6 +45,11 @@ class MultiplayerTests(unittest.TestCase):
         self.assertEqual(text.count("{"), text.count("}"))
         self.assertNotIn("date >", runner.orders_file({}, "not ready", "-"))
 
+    def test_numeric_role_code_is_rejected_without_crashing(self):
+        with tempfile.TemporaryDirectory() as home:
+            Path(home, "multiplayer.json").write_text('{"role":"client","code":2222222}')
+            self.assertIsNone(multiplayer.load_role(home))
+
     def test_log_generation_changes_on_rollback_and_new_game(self):
         with tempfile.TemporaryDirectory() as home:
             path = Path(home, "logs", "game.log")

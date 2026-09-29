@@ -1,62 +1,48 @@
-[h1]A trained model runs the AI's strategy[/h1]
+[h1]JevAI v2 model · experimental multiplayer[/h1]
 
-JevAI lets a neural network choose the strategic posture of AI countries. On every update, a DeBERTa-v3-large model trained on data from 33 observer games reads each country's situation: factories, divisions, manpower, stability, war support, strength ratios, enemies, allies and neighbours. It predicts how each of six postures would work out over the next six months, and the mod applies the best one:
+JevAI uses a locally running DeBERTa-v3-large model to choose strategic priorities for AI countries. It changes AI priorities, not combat bonuses, and excludes human-controlled countries. The native game AI still handles the units.
 
+This release includes [b]v2 OpenVINO models for CPU and Intel NPU[/b], plus an [b]experimental multiplayer relay[/b]. v2 is a small supervised continuation on verified game outcomes. It is not proven stronger in live games; corrected offline evaluation still shows weaknesses.
+
+[h2]What it decides[/h2]
+The six postures are defensive buildup, industrial expansion, armored offensive, air power, naval power and total war economy. They affect AI production, unit mix, factory ratios and construction priorities.
+
+v2 predicts [b]three-month outcomes[/b]. That prediction horizon is separate from the decision frequency you choose in game: weekly, monthly or every three months. Choose major powers, all eligible AI countries (20+ factories), or off.
+
+[h2]Install and run[/h2]
+Windows 10/11 64-bit and HOI4 1.19 are required. Subscribe, enable JevAI in the launcher playset, and open:
+[b]<Steam library>\steamapps\workshop\content\394360\{id}\runner[/b]
 [list]
-[*]defensive buildup
-[*]industrial expansion
-[*]armored offensive
-[*]air power
-[*]naval power
-[*]total war economy
+[*][b]Automatic:[/b] run install.cmd once to prepare the model and add the runner to Windows Startup. uninstall.cmd removes that startup integration.
+[*][b]Manual:[/b] open jevai.exe before the game and keep its console running. No separate Python install is needed.
 [/list]
+The model files are included (the item is a few GB). First compilation depends on hardware; the log reports progress and timeouts. Cached starts are faster. NPU compilation has a ten-minute limit, CPU compilation five minutes; NPU failures fall back to CPU. CPU decisions can take time across many countries, so monthly or quarterly updates are usually more practical than weekly updates for all countries.
 
-A posture changes only what the AI prioritizes: unit mix, production, factory ratios and construction. It gives no bonuses, and your own country is never touched.
+Log: [b]%LOCALAPPDATA%\jevai\jevai.log[/b]. If no decisions appear, check that the playset enabled JevAI and read the runner's load/compile and missing-telemetry messages. Overhauls may replace scripts; the runner adjusts load-order dependencies for the next launch. v2 has seen several overhaul settings, but compatibility and strength are not guaranteed for every mod.
 
-[h2]Setup[/h2]
-Subscribe first. The item is about 2.5 GB because the model is included. Open [b]<your Steam library>\steamapps\workshop\content\394360\{id}\runner[/b] (for example C:\Program Files (x86)\Steam\steamapps\workshop\content\394360\{id}\runner), then choose how to start the companion runner:
-
+[h2]Experimental multiplayer[/h2]
+[b]Two-machine gameplay acceptance has not been completed. Late or missing orders can cause desync. Use this feature only if all players accept that limitation.[/b]
 [list]
-[*][b]Start automatically with Windows:[/b] Run [b]install.cmd[/b] once. It copies the runner to %LOCALAPPDATA%\jevai, prepares the model (about 2 minutes on an Intel NPU, a few seconds on a CPU), starts it now, and adds it to Windows Startup. To stop automatic startup and the running copy, run [b]uninstall.cmd[/b] from the same Workshop folder.
-[*][b]Start manually each time:[/b] Double-click [b]jevai.exe[/b] in the runner folder before launching the game. Keep its console window open while playing; press Ctrl+C in that window when finished. Repeat this each time you play. No startup entry is created.
+[*]Every player needs the same JevAI build, playset and a running companion runner.
+[*]The host runs [b]host.cmd[/b] once and shares its code.
+[*]Other players run [b]join.cmd[/b] and enter the code. Configure roles before starting the session.
+[*]Only the host makes model decisions during multiplayer. Clients receive the same dated order file through a Steam lobby. No configured role means JevAI stays off in multiplayer.
+[*]If Steam integration fails, inspect the relay log. The CLI supports --steam-api for a compatible stock Steam API DLL; do not replace game files blindly.
 [/list]
-
-If Windows SmartScreen warns about the unsigned jevai.exe, choose "More info", then "Run anyway". Start Hearts of Iron IV from the Paradox launcher with JevAI in your playset. The runner waits for the game, steers it while it runs and waits again when you quit. It uses no network.
-
-[h2]In game[/h2]
-At the start of each game, two events ask who the model commands and how often it decides:
-[list]
-[*][b]Major powers only[/b], [b]All AI countries[/b] (those with at least 20 factories) or [b]None[/b] (vanilla AI)
-[*][b]Every week[/b], [b]Every month[/b] or [b]Every 3 months[/b]
-[/list]
-
-The model is prepared before any game (by install.cmd, or by jevai.exe when you start it), so games load it in seconds, before HOI4 has finished loading. If the NPU compile fails or takes more than 10 minutes, JevAI switches to the CPU for good (run jevai.exe --device NPU to try the NPU again). A decision takes about 1.5 seconds per country on an Intel NPU and about 10 seconds on a CPU; the game keeps running meanwhile. On a CPU, weekly decisions for all AI countries cannot keep up, so pick monthly or every 3 months there.
-
-The log is %LOCALAPPDATA%\jevai\jevai.log: one line per update, and a line explaining the problem if the game logs nothing for JevAI (JevAI missing from the playset, two mods named JevAI, or an overhaul mod that replaces its scripts).
-
-[h2]Good to know[/h2]
-[list]
-[*]Windows 10 or 11, 64-bit, and Hearts of Iron IV 1.19. The model runs on an Intel NPU (Core Ultra) if you have one, otherwise on the CPU.
-[*]Overhaul mods: JevAI puts itself after them in the load order, but the model was trained on vanilla 1936 games, so it has not seen other settings.
-[*]Multiplayer is not supported: each player's game would read its own orders.
-[/list]
-
-[h2]Source and model[/h2]
-[list]
-[*]Source code, training pipeline and measurements: [url=https://github.com/zwh20081/hoi4-jevai]github.com/zwh20081/hoi4-jevai[/url]
-[*]The model (PyTorch and OpenVINO): [url=https://huggingface.co/zwh20081/hoi4-jevai]huggingface.co/zwh20081/hoi4-jevai[/url]
-[/list]
-Apache-2.0.
+Single-player decisions run locally without a multiplayer relay. CPU/NPU numerical equivalence has been checked on sample inputs; that does not establish multiplayer synchronization or improved gameplay.
 
 [h2]简体中文[/h2]
-JevAI 让训练好的神经网络为 AI 国家选择战略姿态（防御建设、工业扩张、装甲攻势、空中力量、海军力量、全面战争经济）。姿态只改变 AI 的优先事项，不提供任何加成，也不会影响玩家自己的国家。
-订阅本模组（约 2.5 GB，含模型），打开 [b]<Steam 库>\steamapps\workshop\content\394360\{id}\runner[/b]，选择一种启动方式：
-[list]
-[*][b]随 Windows 自动启动：[/b]运行一次 [b]install.cmd[/b]，它会先准备模型（Intel NPU 约 2 分钟，CPU 几秒），然后立即启动后台程序，并加入开机启动。若要移除，运行同一文件夹里的 [b]uninstall.cmd[/b]。
-[*][b]每次手动启动：[/b]在开始游戏前双击 [b]jevai.exe[/b]，游玩时保持命令窗口打开；结束后在窗口中按 Ctrl+C。下次游玩需要再次启动。
-[/list]
-若 SmartScreen 提示，请选择“更多信息”→“仍要运行”。在 Paradox 启动器中启用 JevAI 并启动游戏。开局的两个事件依次询问：由模型指挥谁（仅主要国家、所有 AI 国家或不启用），以及多久决策一次（每周、每月或每 3 个月）。
+JevAI 用本地模型为 AI 国家选择六种战略姿态：防御建设、工业扩张、装甲攻势、空中力量、海军力量、全面战争经济。它只改变 AI 优先事项，不提供战斗加成，不操控玩家国家；具体单位仍由游戏原生 AI 指挥。
 
-install.cmd（或手动启动的 jevai.exe）会在游戏前准备好模型（Intel NPU 首次约 2 分钟，CPU 几秒），之后每次游戏都能在几秒内加载。若 NPU 编译失败或超过 10 分钟，JevAI 会改用 CPU（运行 jevai.exe --device NPU 可重试 NPU）。每个国家的决策在 Intel NPU 上约 1.5 秒，在 CPU 上约 10 秒，因此使用 CPU 时请选择每月或每 3 个月。日志：%LOCALAPPDATA%\jevai\jevai.log，若游戏没有记录 JevAI 的信息，日志会说明原因（播放集未启用 JevAI、有两个名为 JevAI 的模组，或大型模组替换了它的脚本）。不支持多人游戏。
+本版包含 [b]v2 CPU / Intel NPU OpenVINO 模型[/b]和[b]实验性多人功能[/b]。v2 经过少量真实游戏结果后训练，但尚未证明能提升实际游戏表现。默认预测未来[b]三个月[/b]，与开局选择的每周／每月／每三个月决策频率不同。
 
-源代码：[url=https://github.com/zwh20081/hoi4-jevai]github.com/zwh20081/hoi4-jevai[/url]；模型：[url=https://huggingface.co/zwh20081/hoi4-jevai]huggingface.co/zwh20081/hoi4-jevai[/url]。
+订阅并在启动器启用后，打开 [b]<Steam 库>\steamapps\workshop\content\394360\{id}\runner[/b]。运行一次 [b]install.cmd[/b]可准备模型并加入开机启动；[b]uninstall.cmd[/b]移除该启动方式。也可每次游戏前手动打开 [b]jevai.exe[/b]并保持窗口运行。需要 Windows 10/11 64 位、HOI4 1.19，无需另装 Python。首次编译时间取决于硬件，NPU 最长十分钟、CPU 五分钟；NPU 失败可回退 CPU。CPU 指挥较多国家时，建议每月或每三个月决策。
+
+[b]多人尚未完成双机实测，命令迟到或丢失可能导致不同步。[/b]所有玩家使用相同版本和播放集并运行伴随程序；主机运行 [b]host.cmd[/b]分享代码，其他玩家运行 [b]join.cmd[/b]输入代码。请在开局前设定角色。多人局只有主机做模型决策，客户端通过 Steam 接收带日期的同一命令文件；未配置角色时多人局不启用 JevAI。
+
+日志：[b]%LOCALAPPDATA%\jevai\jevai.log[/b]。本版的 CPU/NPU 数值一致性检查不能代替双机同步测试，也不代表模型已经更强。
+
+[h2]Source and model / 源码与模型[/h2]
+[url=https://github.com/zwh20081/hoi4-jevai]GitHub: source, tests and multiplayer acceptance guide[/url]
+[url=https://huggingface.co/zwh20081/hoi4-jevai]Hugging Face: v1, experimental v2 weights, OpenVINO and evaluation[/url]
+License: Apache-2.0.

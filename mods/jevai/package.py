@@ -5,7 +5,7 @@ needed) and the exported model next to it.
 
 Layout of the release (copy the folder into Documents/Paradox Interactive/Hearts of Iron IV/mod/ and add jevai.mod):
     jevai/descriptor.mod, thumbnail.png, common/, events/, localisation/, history/   the HOI4 mod
-    jevai/runner/jevai.exe (+ _internal/), install.cmd, uninstall.cmd              the runner
+    jevai/runner/jevai.exe (+ _internal/), install.cmd, uninstall.cmd, host.cmd, join.cmd  the runner
     jevai/runner/model/                                             jev_npu.xml/.bin, jev_cpu.xml/.bin, tokenizer.json, jev.json
     jevai.mod                                                       descriptor for the launcher (path = mod/jevai)
 """
@@ -16,9 +16,24 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
+
+
+def output_directory(path: str) -> str:
+    """Only replace a marked release inside this checkout's temp/release* tree."""
+    target = Path(path).resolve()
+    temp = (Path(ROOT) / "temp").resolve()
+    if not target.is_relative_to(temp):
+        raise ValueError("release output must be under this checkout's temp directory")
+    parts = target.relative_to(temp).parts
+    if len(parts) < 2 or not parts[0].startswith("release"):
+        raise ValueError("use a release subdirectory, such as temp/release-mp/jevai")
+    if target.exists() and any(target.iterdir()) and not (target / "descriptor.mod").is_file():
+        raise ValueError("refusing to replace a non-release directory")
+    return str(target)
 
 
 def main(argv=None):
@@ -26,17 +41,17 @@ def main(argv=None):
     ap.add_argument("--model", required=True, help="exported model folder (trainer.export --out)")
     ap.add_argument("--out", default=os.path.join(ROOT, "temp", "release", "jevai"))
     a = ap.parse_args(argv)
-    out = os.path.abspath(a.out)
+    out = output_directory(a.out)
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(out)
     for part in ("descriptor.mod", "thumbnail.png", "common", "events", "history", "localisation"):
         src = os.path.join(HERE, part)
         (shutil.copytree if os.path.isdir(src) else shutil.copy2)(src, os.path.join(out, part))
-    work = os.path.join(ROOT, "temp", "release", "build")
+    work = os.path.join(os.path.dirname(out), "build")
     entry = os.path.join(work, "jevai_main.py")
     os.makedirs(work, exist_ok=True)
     with open(entry, "w", encoding="utf-8") as f:
-        f.write("from mods.jevai.runtime.runner import main\nmain()\n")
+        f.write("from mods.jevai.runtime.runner import main\nraise SystemExit(main())\n")
     # the runner needs openvino, tokenizers and numpy; torch & co. only come in through openvino's optional frontends
     excludes = [x for m in ("torch", "torchvision", "transformers", "datasets", "sklearn", "nncf", "scipy", "pandas",
                             "matplotlib", "tensorflow", "keras", "jax", "onnx", "paddle", "IPython")
@@ -50,9 +65,11 @@ def main(argv=None):
     shutil.copytree(a.model, os.path.join(out, "runner", "model"))
     for name, args, note in (("install.cmd", " --install", "Run once: prepares the model (about 2 minutes on an Intel NPU, seconds on a CPU); "
                                                           "JevAI then starts with Windows and steers every game you start from the launcher."),
-                             ("uninstall.cmd", " --uninstall", "Stops JevAI starting with Windows and stops the background runner.")):
+                             ("uninstall.cmd", " --uninstall", "Stops JevAI starting with Windows and stops the background runner."),
+                             ("host.cmd", " --host", "Experimental multiplayer: share the printed code with the other players."),
+                             ("join.cmd", " --join", "Experimental multiplayer: enter the host code when JevAI asks.")):
         with open(os.path.join(out, "runner", name), "w", encoding="utf-8", newline="\r\n") as f:
-            f.write(f'@echo off\nrem {note}\n"%~dp0jevai.exe"{args}\npause\n')
+            f.write(f'@echo off\nsetlocal DisableDelayedExpansion\nrem {note}\n"%~dp0jevai.exe"{args}\npause\n')
     with open(os.path.join(HERE, "descriptor.mod"), encoding="utf-8-sig") as f:
         desc = f.read().rstrip()
     with open(os.path.join(os.path.dirname(out), "jevai.mod"), "w", encoding="utf-8") as f:

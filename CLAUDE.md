@@ -89,6 +89,18 @@ reloads it with `load_oob` (once per day, whatever the tags) and `jev_follow_ord
 countries only. The runner logs to `%LOCALAPPDATA%\jevai\jevai.log`. Unverified in-game so far: that `load_oob` re-reads the file from disk on every call (`JEV|ACT`
 lines in game.log show postures being applied).
 
+Experimental multiplayer (`docs/superpowers/specs/2026-09-28-multiplayer-design.md`): every game must apply identical
+orders on the same day. `jevai.exe --host` / `--join CODE` store the role in
+`%LOCALAPPDATA%\jevai\multiplayer.json`; bare `--join` reads and validates a code in Python. `join.cmd` passes only
+that fixed switch; never interpolate untrusted input through CMD (`%CODE%` is command injection). Configure the role
+before launching the game. The multiplayer launch marker gates host-only inference; clients receive orders through
+a Steam lobby relay child. Unconfigured multiplayer runs make no decisions. Order sets target the host's newest
+logged date plus `multiplayer.MARGIN_DAYS`; the guard uses `date >` the preceding day. Single-player ignores roles.
+The relay is isolated from inference and accepts a Steam API path override (`--steam-api`); failures must remain
+visible in the runner log. This is experimental: real two-machine timing, matching action receipts, relay interruption
+and resync are not yet accepted. Do not claim desync-free play, bump to 0.4.0 or publish before that acceptance.
+Package smoke tests use `--out temp/release-mp/jevai`, never overwrite the published `temp/release/jevai` build.
+
 Load order: overhaul mods `replace_path` `common/on_actions`, `events`, `common/scripted_effects` and `history/units`,
 which drops those folders from every mod loaded before them, and mods load alphabetically unless a dependency says
 otherwise. The shipped `descriptor.mod` has no hard dependencies. `runner.patch_load_order` adds only enabled mods

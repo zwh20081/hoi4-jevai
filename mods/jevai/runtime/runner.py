@@ -37,9 +37,11 @@ import threading
 import time
 import traceback
 import uuid
+import zlib
 
 import numpy as np
 
+from . import multiplayer, steamlobby
 from .pack import Packer
 from .postures import NAMES as POSTURES, VERSION
 from .text import GROWTH_LEVELS, posture_questions, state_text
@@ -358,7 +360,12 @@ class GameLog:
             if not m:
                 continue
             date = tuple(map(int, m.groups()[:3]))
-            self.now = 365 * date[0] + MONTH_START[date[1] - 1] + date[2]
+            day = 365 * date[0] + MONTH_START[date[1] - 1] + date[2]
+            if day < self.now:
+                pos, kind = self.pos, self.multiplayer
+                self.reset()
+                self.pos, self.multiplayer = pos, kind
+            self.now = day
             if len(self.days) < 3:
                 self.days.add(date)
             if not m.group(4).startswith("JEV|"):
@@ -476,10 +483,13 @@ def compile_only(device: str, model_dir: str) -> int:
     return 0
 
 
+def me() -> list[str]:
+    """This runner again, as a child process: jevai.exe itself when frozen, else this module."""
+    return [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", __spec__.name]
+
+
 def child_command(model_dir: str, device: str) -> list[str]:
-    """This runner again, in child mode: jevai.exe itself when frozen, else this module."""
-    me = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", __spec__.name]
-    return me + ["--compile", device, "--model", model_dir]
+    return me() + ["--compile", device, "--model", model_dir]
 
 
 def compile_child(model_dir: str, device: str, limit: float) -> tuple[bool, str]:
@@ -634,6 +644,84 @@ def write_atomic(path: str, text: str):
     os.replace(tmp, path)
 
 
+def default_steam_api() -> str:
+    """The game's own steam_api64.dll, or "" when HOI4 is not in a Steam library."""
+    exe = find_game()
+    return os.path.join(os.path.dirname(exe), "steam_api64.dll") if exe else ""
+
+
+def start_relay(a, role: dict, orders: str) -> subprocess.Popen:
+    """The Steam relay of this multiplayer game (jevai.exe --relay), stopped when the game closes."""
+    dll = role.get("steam_api") or a.steam_api or default_steam_api()
+    cmd = me() + ["--relay", role["role"], "--orders", orders, "--steam-api", dll]
+    return subprocess.Popen(cmd + (["--code", role["code"]] if role.get("code") else []),
+                            creationflags=NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS)
+
+
+def publish(lobby, orders: str, last: str | None) -> str | None:
+    """Host relay, one poll: put the orders file in the lobby when it changed; returns what the lobby holds."""
+    text = _read(orders)
+    if text and text != last:
+        if not lobby.set("orders", multiplayer.pack(text)):
+            raise steamlobby.SteamError("Steam refused the orders update")
+        return text
+    return last
+
+
+def fetch(lobby, orders: str, last: str | None) -> str | None:
+    """Client relay, one poll: write the host's newest orders file when it changed; returns the last set seen."""
+    wire = lobby.get("orders")
+    if not wire or wire == last:
+        return last
+    write_atomic(orders, multiplayer.unpack(wire))
+    return wire
+
+
+def relay(role: str, orders: str, code: str | None, dll: str) -> int:
+    """Child mode (jevai.exe --relay host|client): the only process that loads steam_api64.dll, so a replaced or old DLL
+    can only crash this one. The host's relay puts each new orders file in its lobby; a client's relay finds the host's
+    lobby by code and writes each set to its own orders file, byte for byte. Runs until the runner stops it; logs to
+    jevai.log."""
+    os.makedirs(HOME, exist_ok=True)
+    with open(os.path.join(HOME, "jevai.log"), "a", encoding="utf-8") as out:
+        def say(msg: str):
+            out.write(f"[{time.strftime('%H:%M:%S')}] relay: {msg}\n")
+            out.flush()
+
+        try:
+            lobby = steamlobby.Lobby(dll)
+            lobby.open()
+            if role == "host":
+                code = multiplayer.code_for(lobby.account_id())
+                lobby.create(code)
+                say(f"hosting; the other players run jevai.exe --join {code}")
+            else:
+                if not multiplayer.valid_code(code or ""):
+                    raise ValueError("invalid host pairing code")
+                code = code.upper()
+                waited = False
+                while not (found := lobby.find(code)):
+                    if not waited:
+                        say(f"waiting for the host {code} (its JevAI opens the lobby when its game starts)")
+                        waited = True
+                    time.sleep(10)
+                lobby.join(found)
+                say(f"following the host {code}")
+            last = None
+            while True:
+                lobby.tick()
+                if multiplayer.code_for(lobby.owner()) != code:
+                    raise steamlobby.SteamError("lobby owner no longer matches the pairing code")
+                new = publish(lobby, orders, last) if role == "host" else fetch(lobby, orders, last)
+                if new != last:
+                    say(("sent " if role == "host" else "received ") + _read(orders).split("\n", 1)[0].lstrip("# "))
+                    last = new
+                time.sleep(1)
+        except (steamlobby.SteamError, OSError, ValueError, RuntimeError, AttributeError, zlib.error) as e:
+            say(f"stopped: {e}")
+            return 1
+
+
 class Tee:
     """Runner output goes to the console and to HOME/jevai.log, readable after the window closes."""
 
@@ -656,12 +744,15 @@ def model_dir(a, mod: str) -> str:
 
 
 def session(a, mod: str, pid: int):
-    """Steer one running game until its process `pid` exits: load the English names and the model (prepared into the
-    cache already, normally: seconds) while the game loads, then decide on the updates the mod logs, once per period
-    the player chose. Says once why, if the game logs nothing for JevAI."""
+    """Steer one running game until its process `pid` exits: once the game session starts, load the English names and
+    the model (prepared into the cache already, normally: seconds), then decide on the updates the mod logs, once per
+    period the player chose. In a multiplayer game only the host (jevai.exe --host) decides: every order set applies
+    multiplayer.MARGIN_DAYS after the host's newest game date, and the relay carries it to the other players' games.
+    Says once why, if the game logs nothing for JevAI."""
     orders = os.path.join(mod, "history", "units", ORDERS + ".txt")
     write_atomic(orders, orders_file({}, "no update yet", "-"))  # not the last game's
     log = GameLog(a.userdir)
+    role = multiplayer.load_role(HOME)
     print(f"reading {log.path}; orders go to {orders}", flush=True)
     ready: dict = {}
 
@@ -677,70 +768,153 @@ def session(a, mod: str, pid: int):
         except Exception as e:  # noqa: BLE001 - reported below; the game keeps running without the model
             ready["error"] = e
 
-    loader = threading.Thread(target=load, daemon=True)
-    loader.start()
+    loader = proc = None
     model = names_en = last = None  # last: game day of the last decision
     per_country = 0.0  # seconds, from the last batch
     started = checked = time.time()
-    explained = False
-    while True:
-        if time.time() - checked > 5:
-            checked = time.time()
-            if pid not in pids("hoi4.exe"):
-                return
-            if not explained and (why := silence(a.userdir, log, checked - started)):
-                print(why, flush=True)
-                explained = True
-        log.poll()
-        if model is None:
-            if "error" in ready:
-                print(f"model failed to load: {ready['error']}; JevAI sits out this game", flush=True)
+    explained = told = False
+    generation = log.generation
+    try:
+        while True:
+            if time.time() - checked > 5:
+                checked = time.time()
+                if pid not in pids("hoi4.exe"):
+                    return
+                if not explained and (why := silence(a.userdir, log, checked - started)):
+                    print(why, flush=True)
+                    explained = True
+            log.poll()
+            if log.generation != generation:
+                if proc:
+                    proc.kill()
+                    proc.wait()
+                    proc = None
+                write_atomic(orders, orders_file({}, "new game session", "-"))
+                generation, last, told = log.generation, None, False
+                role = multiplayer.load_role(HOME)
+            if log.multiplayer is None:  # the menus: no game session yet
+                time.sleep(1)
+                continue
+            if log.multiplayer and role and proc is None:
+                proc = start_relay(a, role, orders)
+                print("multiplayer game: JevAI " + ("decides for everyone" if role["role"] == "host"
+                                                    else f"applies the orders of the host {role['code']}"), flush=True)
+            if proc and proc.poll() is not None:
+                print(f"multiplayer relay exited ({proc.returncode}); JevAI stops issuing orders for this game",
+                      flush=True)
+                write_atomic(orders, orders_file({}, "relay stopped", "-"))
                 while pid in pids("hoi4.exe"):
                     time.sleep(5)
                 return
-            if loader.is_alive():
+            if log.multiplayer and (role is None or role["role"] == "client"):
+                if loader is not None and not loader.is_alive():
+                    ready.clear()
+                    model = names_en = loader = None
+                if role is None and not told:
+                    print("multiplayer game without a JevAI role, so JevAI stays off: the host runs jevai.exe --host, "
+                          "the other players jevai.exe --join CODE", flush=True)
+                    told = True
                 time.sleep(1)
                 continue
-            model, names_en = ready["model"], ready["names"]
-            per_country = 1.5 if model.device == "NPU" else 10.0
-            log.complete(quiet=0)  # what was logged before the model was ready is history; decide from the next update
-            print("waiting for the game's next update (the 1st of each month, or weekly with the weekly period)", flush=True)
-        done = log.complete()
-        if not done:
-            time.sleep(1)
-            continue
-        date, reported = done[-1]  # if the game ran ahead of the model, the older bursts are stale: decide the newest
-        now = f"[{time.strftime('%H:%M:%S')}] {date}"
-        if log.mode in (None, "off"):
-            print(f"{now}: " + ("waiting for the JevAI choice in the start-of-game event" if log.mode is None
-                                else "JevAI is off for this game (vanilla AI)"), flush=True)
-            continue
-        period = log.period or ("week" if log.mode == "majors" else "month")  # saves from JevAI 0.2 log no period
-        if not due(period, last, game_day(date)):
-            continue
-        recs, names, humans, majors = log_records([p for ls in log.latest.values() for p in ls], names_en, date)
-        humans |= set(filter(None, a.player.split(",")))
-        elig = [t for t in reported if t in recs and t not in humans and recs[t]["mil"] + recs[t]["civ"] >= a.min_factories
-                and (log.mode == "all" or t in majors)]
-        if not elig:
-            continue
-        head = f"{now} ({log.mode}, {period})"
-        if (est := len(elig) * per_country) > 20:  # a CPU takes minutes for a big batch: say so before it starts
-            print(f"{head}: deciding {len(elig)} countries on {model.device}, about "
-                  + (f"{est:.0f}s" if est < 120 else f"{est / 60:.0f} min"), flush=True)
-        t0 = time.time()
-        chosen = {}
-        for t in elig:
-            u = model.scores(state_text(recs[t], names, recs), a.horizon)
-            best, cur = int(np.argmax(u)), int(recs[t]["jev"].get("pos") or 0) - 1  # cur: posture in force, -1 none
-            # near-ties flip with tiny changes (even the date): switch only for a clear gain
-            chosen[t] = (cur if 0 <= cur < len(u) and u[best] - u[cur] < a.stick else best) + 1
-        write_atomic(orders, orders_file(chosen, date, model.device))
-        last, per_country = game_day(date), (time.time() - t0) / len(elig)
-        top = sorted(chosen.items(), key=lambda kv: -(recs[kv[0]]["mil"] + recs[kv[0]]["civ"]))[:6]
-        skipped = f"; {len(done) - 1} older updates skipped" if len(done) > 1 else ""
-        print(f"{head}: {len(chosen)} countries in {time.time() - t0:.0f}s on {model.device}{skipped}; "
-              + ", ".join(f"{t} {POSTURES[k - 1]}" for t, k in top), flush=True)
+            if loader is None:
+                loader = threading.Thread(target=load, daemon=True)
+                loader.start()
+            if model is None:
+                if "error" in ready:
+                    print(f"model failed to load: {ready['error']}; JevAI sits out this game", flush=True)
+                    while pid in pids("hoi4.exe"):
+                        time.sleep(5)
+                    return
+                if loader.is_alive():
+                    time.sleep(1)
+                    continue
+                model, names_en = ready["model"], ready["names"]
+                per_country = 1.5 if model.device == "NPU" else 10.0
+                log.complete(quiet=0)  # what was logged before the model was ready is history; decide from the next update
+                print("waiting for the game's next update (the 1st of each month, or weekly with the weekly period)",
+                      flush=True)
+            done = log.complete()
+            if not done:
+                time.sleep(1)
+                continue
+            date, reported = done[-1]  # if the game ran ahead of the model, the older bursts are stale: decide the newest
+            now = f"[{time.strftime('%H:%M:%S')}] {date}"
+            if log.mode in (None, "off"):
+                print(f"{now}: " + ("waiting for the JevAI choice in the start-of-game event" if log.mode is None
+                                    else "JevAI is off for this game (vanilla AI)"), flush=True)
+                continue
+            period = log.period or ("week" if log.mode == "majors" else "month")  # saves from JevAI 0.2 log no period
+            if not due(period, last, game_day(date)):
+                continue
+            recs, names, humans, majors = log_records([p for ls in log.latest.values() for p in ls], names_en, date)
+            humans |= set(filter(None, a.player.split(",")))
+            elig = [t for t in reported if t in recs and t not in humans and recs[t]["mil"] + recs[t]["civ"] >= a.min_factories
+                    and (log.mode == "all" or t in majors)]
+            if not elig:
+                continue
+            head = f"{now} ({log.mode}, {period})"
+            if (est := len(elig) * per_country) > 20:  # a CPU takes minutes for a big batch: say so before it starts
+                print(f"{head}: deciding {len(elig)} countries on {model.device}, about "
+                      + (f"{est:.0f}s" if est < 120 else f"{est / 60:.0f} min"), flush=True)
+            t0 = time.time()
+            chosen = {}
+            batch_generation = log.generation
+            for t in elig:
+                horizon = a.horizon if a.horizon is not None else getattr(model, "cfg", {}).get("horizon", 6)
+                u = model.scores(state_text(recs[t], names, recs), horizon)
+                best, cur = int(np.argmax(u)), int(recs[t]["jev"].get("pos") or 0) - 1  # cur: posture in force, -1 none
+                # near-ties flip with tiny changes (even the date): switch only for a clear gain
+                chosen[t] = (cur if 0 <= cur < len(u) and u[best] - u[cur] < a.stick else best) + 1
+            log.poll()
+            if log.generation != batch_generation:
+                print("game session changed while deciding; discarded the old batch", flush=True)
+                continue
+            if log.mode == "off":
+                write_atomic(orders, orders_file({}, "JevAI is off", "-"))
+                continue
+            if proc and proc.poll() is not None:
+                continue
+            target = day_date(log.now + multiplayer.MARGIN_DAYS) if log.multiplayer else date
+            write_atomic(orders, orders_file(chosen, date, model.device, target))
+            last, per_country = game_day(date), (time.time() - t0) / len(elig)
+            top = sorted(chosen.items(), key=lambda kv: -(recs[kv[0]]["mil"] + recs[kv[0]]["civ"]))[:6]
+            skipped = f"; {len(done) - 1} older updates skipped" if len(done) > 1 else ""
+            print(f"{head}: {len(chosen)} countries in {time.time() - t0:.0f}s on {model.device}{skipped}; "
+                  + ", ".join(f"{t} {POSTURES[k - 1]}" for t, k in top), flush=True)
+    finally:
+        if proc:
+            proc.kill()
+            proc.wait()
+
+
+def set_role(a) -> int:
+    """jevai.exe --host / --join CODE: this PC's part in multiplayer games, kept in HOME/multiplayer.json for the running
+    JevAI, which reads it when a game starts; single-player games ignore it."""
+    if a.join is not None:
+        if not a.join:
+            try:
+                a.join = input("JevAI code from the host: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("No pairing code entered; multiplayer role unchanged")
+                return 1
+        a.join = a.join.strip()
+        if not multiplayer.valid_code(a.join):
+            print(f"{a.join} is not a JevAI code (7 letters and digits, printed by the host's jevai.exe --host)")
+            return 1
+        multiplayer.save_role(HOME, "client", a.join, a.steam_api)
+        print(f"multiplayer games: this PC applies the orders of the host {a.join.upper()} (from the next game)")
+        return 0
+    multiplayer.save_role(HOME, "host", steam_api=a.steam_api)
+    lobby = steamlobby.Lobby(a.steam_api or default_steam_api())
+    try:
+        lobby.open()
+        code = multiplayer.code_for(lobby.account_id())
+    except (steamlobby.SteamError, OSError, AttributeError) as e:
+        print(f"multiplayer games: this PC hosts. Steam did not answer ({e}); the code to share appears in jevai.log "
+              "when a multiplayer game starts")
+        return 0
+    print(f"multiplayer games: this PC hosts. The other players run: jevai.exe --join {code}")
+    return 0
 
 
 def main(argv=None):
@@ -753,18 +927,37 @@ def main(argv=None):
                     help="the JevAI mod folder (default: the one jevai.exe is in); games use the copy enabled in the playset")
     ap.add_argument("--model", help="exported model folder (default: runner/model of the JevAI copy the game uses)")
     ap.add_argument("--device", default="auto", choices=["auto", "NPU", "CPU", "GPU"])
-    ap.add_argument("--horizon", type=int, default=6, help="months the posture questions look ahead")
+    ap.add_argument("--horizon", type=int, help="months to look ahead (default: model config, or 6 for older models)")
     ap.add_argument("--stick", type=float, default=0.01, help="keep the current posture unless another scores this much higher")
     ap.add_argument("--min-factories", type=int, default=20, help="skip countries with fewer military + civilian factories")
     ap.add_argument("--player", default="", help="extra tag(s) never to steer, comma separated (humans are excluded anyway)")
     ap.add_argument("--compile", metavar="DEVICE", help=argparse.SUPPRESS)  # child mode, see prepare
+    roles = ap.add_mutually_exclusive_group()
+    roles.add_argument("--host", action="store_true", help="multiplayer: host and print a pairing code")
+    roles.add_argument("--join", metavar="CODE", nargs="?", const="", help="multiplayer: join a host (prompts if omitted)")
+    ap.add_argument("--steam-api", help="multiplayer: steam_api64.dll path (default: the game's)")
+    ap.add_argument("--relay", choices=["host", "client"], help=argparse.SUPPRESS)
+    ap.add_argument("--orders", help=argparse.SUPPRESS)
+    ap.add_argument("--code", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
+    if a.horizon is not None and a.horizon <= 0:
+        ap.error("--horizon must be positive")
+    if a.relay and (not a.orders or (a.relay == "client" and not multiplayer.valid_code(a.code or ""))):
+        ap.error("--relay requires --orders and clients require a valid --code")
     a.mod = os.path.abspath(a.mod)
+    if a.relay:
+        return relay(a.relay, a.orders, a.code, a.steam_api or default_steam_api())
     if a.compile:
         return compile_only(a.compile, a.model or os.path.join(a.mod, "runner", "model"))
-    if sys.stdout:  # a process started without a console has none
+    if hasattr(sys.stdout, "reconfigure"):  # a process started without a console has none
         sys.stdout.reconfigure(errors="replace")  # mod names can be in any script; a cp1252 stdout must not crash
     os.makedirs(HOME, exist_ok=True)
+    if a.host or a.join is not None:
+        try:
+            return set_role(a)
+        except OSError as e:
+            print(f"Could not save multiplayer role: {e}")
+            return 1
     sys.stdout = Tee(*filter(None, [sys.stdout]), open(os.path.join(HOME, "jevai.log"), "a", encoding="utf-8"))
     if a.install or a.uninstall:
         if a.uninstall:
@@ -781,7 +974,9 @@ def main(argv=None):
     print(f"\n=== JevAI runner started {time.strftime('%Y-%m-%d %H:%M:%S')} for {a.mod}", flush=True)
     if not os.path.isdir(os.path.join(a.mod, "history", "units")):
         sys.exit(f"JevAI mod not found in {a.mod}; run install.cmd from the mod's runner folder")
-    prepare(model_dir(a, a.mod), a.device)  # the compile check at start: a warm cache before the next game
+    role = multiplayer.load_role(HOME)
+    if not role or role["role"] != "client":
+        prepare(model_dir(a, a.mod), a.device)  # a warm cache before the next game
     n_deps = None
     while True:
         deps = patch_load_order(a.userdir, a.mod)  # before each game, so a newly installed overhaul is covered
@@ -808,4 +1003,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -10,6 +10,8 @@ import re
 import tempfile
 import time
 
+from .multiplayer import code_for
+
 APP = 394360  # Hearts of Iron IV
 KEY = "jevai"  # the lobby data key holding the host's pairing code
 INVISIBLE, EQUAL, WORLDWIDE = 3, 0, 3  # ELobbyType, ELobbyComparison, ELobbyDistanceFilter
@@ -117,7 +119,15 @@ class Lobby:
             self.mm, KEY.encode(), code.encode(), EQUAL)
         self._fn("SteamAPI_ISteamMatchmaking_AddRequestLobbyListDistanceFilter", None, P, C.c_int)(self.mm, WORLDWIDE)
         r = self._wait(self._fn("SteamAPI_ISteamMatchmaking_RequestLobbyList", u64, P)(self.mm), LobbyMatchList(), 510)
-        return self._fn("SteamAPI_ISteamMatchmaking_GetLobbyByIndex", u64, P, C.c_int)(self.mm, 0) if r.count else 0
+        for i in range(r.count):
+            lobby = self._fn("SteamAPI_ISteamMatchmaking_GetLobbyByIndex", u64, P, C.c_int)(self.mm, i)
+            if code_for(self.owner(lobby)) == code.upper():
+                return lobby
+        return 0
+
+    def owner(self, lobby: int | None = None) -> int:
+        return self._fn("SteamAPI_ISteamMatchmaking_GetLobbyOwner", u64, P, u64)(
+            self.mm, self.lobby if lobby is None else lobby) & 0xFFFFFFFF
 
     def join(self, lobby: int):
         r = self._wait(self._fn("SteamAPI_ISteamMatchmaking_JoinLobby", u64, P, u64)(self.mm, lobby), LobbyEnter(), 504)
